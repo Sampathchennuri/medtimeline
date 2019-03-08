@@ -3,26 +3,22 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-import {HttpClient, HttpHeaders, HttpParams} from '@angular/common/http';
 import {Inject, Injectable, SecurityContext} from '@angular/core';
 import {DomSanitizer} from '@angular/platform-browser';
 import {Interval} from 'luxon';
 
-import {APP_TIMESPAN, EARLIEST_ENCOUNTER_START_DATE, FhirResourceType} from '../constants';
+import {FhirResourceType} from '../constants';
 
 import {BCHMicrobioCodeGroup} from './clinicalconcepts/bch-microbio-code';
 import {LOINCCode} from './clinicalconcepts/loinc-code';
 import {documentReferenceLoinc} from './clinicalconcepts/resource-code-manager';
 import {RxNormCode} from './clinicalconcepts/rx-norm';
-import {DebuggerService} from './debugger.service';
 import {DiagnosticReport} from './fhir-data-classes/diagnostic-report';
 import {Encounter} from './fhir-data-classes/encounter';
 import {MedicationAdministration} from './fhir-data-classes/medication-administration';
 import {MedicationOrder} from './fhir-data-classes/medication-order';
 import {Observation, ObservationStatus} from './fhir-data-classes/observation';
-import {LabeledClass} from './fhir-resource-set';
 import {FhirService} from './fhir.service';
-import * as FhirConfig from './fhir_config';
 import {SMART_ON_FHIR_CLIENT} from './smart-on-fhir-client';
 
 
@@ -36,10 +32,13 @@ const CERNER_MAX_OBS_RESULTS_RETURNED = 100;
 @Injectable()
 export class FhirHttpService extends FhirService {
   readonly smartApiPromise: Promise<any>;
+  errorMessage: string;
+
+  private createContentTypeString = 'application/xhtml+xml;charset=utf-8';
+
   constructor(
-      private debugService: DebuggerService,
       @Inject(SMART_ON_FHIR_CLIENT) smartOnFhirClient: any,
-      private sanitizer: DomSanitizer, private http: HttpClient) {
+      private sanitizer: DomSanitizer) {
     super();
     // Create a promise which resolves to the smart API when the smart API is
     // ready. This allows clients of this service to call service methods
@@ -65,8 +64,8 @@ export class FhirHttpService extends FhirService {
         code: LOINCCode.CODING_STRING + '|' + code.codeString,
         date: {
           $and: [
-            GREATER_OR_EQUAL + dateRange.start.toISODate(),
-            LESS_OR_EQUAL + dateRange.end.toISODate()
+            GREATER_OR_EQUAL + dateRange.start.toISO(),
+            LESS_OR_EQUAL + dateRange.end.toISO()
           ]
         },
         _count: limitCount ? limitCount : CERNER_MAX_OBS_RESULTS_RETURNED
@@ -90,7 +89,6 @@ export class FhirHttpService extends FhirService {
                     // Do not return any Observations for this code if one of
                     // the Observation constructions throws an error.
                     rejection => {
-                      this.debugService.logError(rejection);
                       throw rejection;
                     }));
   }
@@ -110,9 +108,12 @@ export class FhirHttpService extends FhirService {
       query: {
         effectivetime: {
           $and: [
-            GREATER_OR_EQUAL + dateRange.start.toISODate(),
-            LESS_OR_EQUAL + dateRange.end.toISODate()
+            GREATER_OR_EQUAL + dateRange.start.toISO(),
+            LESS_OR_EQUAL + dateRange.end.toISO()
           ]
+        },
+        medication: {
+          code: RxNormCode.CODING_STRING + '|' + code.codeString,
         }
       }
     };
@@ -122,30 +123,17 @@ export class FhirHttpService extends FhirService {
     }
 
     return this.smartApiPromise.then(
-        smartApi =>
-            smartApi.patient.api.fetchAll(queryParams)
-                .then(
-                    (results: any[]) =>
-                        results
-                            .filter(
-                                result =>
-                                    LabeledClass.extractMedicationEncoding(
-                                        result) === code)
-                            .map(result => {
-                              try {
-                                return new MedicationAdministration(result);
-                              } catch (e) {
-                                this.debugService.logError(e);
-                                throw e;
-                              }
+        smartApi => smartApi.patient.api.fetchAll(queryParams)
+                        .then(
+                            (results: any[]) => results.map(result => {
+                              return new MedicationAdministration(result);
                             }),
-                    // Do not return any MedicationAdministrations for
-                    // this code if one of the MedicationAdministration
-                    // constructions throws an error.
-                    rejection => {
-                      this.debugService.logError(rejection);
-                      throw rejection;
-                    }));
+                            // Do not return any MedicationAdministrations for
+                            // this code if one of the MedicationAdministration
+                            // constructions throws an error.
+                            rejection => {
+                              throw rejection;
+                            }));
   }
 
   /**
@@ -165,7 +153,6 @@ export class FhirHttpService extends FhirService {
                     // this code if one of the MedicationOrder
                     // constructions throws an error.
                     rejection => {
-                      this.debugService.logError(rejection);
                       throw rejection;
                     }));
   }
@@ -174,32 +161,30 @@ export class FhirHttpService extends FhirService {
    * Gets administrations for specified order id.
    * @param id The id to pull the order from.
    */
-  getMedicationAdministrationsWithOrder(id: string, code: RxNormCode):
+  getMedicationAdministrationsWithOrder(id: string):
       Promise<MedicationAdministration[]> {
     const queryParams = {
       type: FhirResourceType.MedicationAdministration,
+
+      query: {
+        prescription:
+            {reference: [FhirResourceType.MedicationOrder, id].join('/')}
+      }
     };
     return this.smartApiPromise.then(
-        smartApi =>
-            smartApi.patient.api.fetchAll(queryParams)
-                .then(
-                    (results: any[]) => {
-                      results
-                          .filter(
-                              result => LabeledClass.extractMedicationEncoding(
-                                            result) === code)
-                          .map(result => {
-                            return new MedicationAdministration(result);
-                          })
-                          .filter(admin => admin.medicationOrderId === id);
-                    },
-                    // Do not return any MedicationOrders for
-                    // this code if one of the MedicationOrder
-                    // constructions throws an error.
-                    rejection => {
-                      this.debugService.logError(rejection);
-                      throw rejection;
-                    }));
+        smartApi => smartApi.patient.api.fetchAll(queryParams)
+                        .then(
+                            (results: any[]) => {
+                              results.map(result => {
+                                return new MedicationAdministration(result);
+                              });
+                            },
+                            // Do not return any MedicationOrders for
+                            // this code if one of the MedicationOrder
+                            // constructions throws an error.
+                            rejection => {
+                              throw rejection;
+                            }));
   }
 
   /**
@@ -213,45 +198,33 @@ export class FhirHttpService extends FhirService {
       type: FhirResourceType.Encounter,
     };
 
-    if (!dateRange) {
-      dateRange = APP_TIMESPAN;
-    }
     // The Cerner implementation of the Encounter search does not offer any
     // filtering by date at this point, so we grab all the encounters
-    // then filter them down to those which intersect with the date range
-    // we query, and those that have a start date no earlier than a year prior
-    // to now.
+    // then filter them.
+
     return this.smartApiPromise.then(
         smartApi => smartApi.patient.api.fetchAll(queryParams)
-                        .then(
-                            (results: any[]) => {
-                              results =
-                                  results
-                                      .map(result => {
-                                        return new Encounter(result);
-                                      })
-                                      .filter(
-                                          encounter =>
-                                              dateRange.intersection(
-                                                  encounter.period) !== null)
-                                      .filter(
-                                          encounter => encounter.period.start >=
-                                              EARLIEST_ENCOUNTER_START_DATE);
-                              return results;
-                            },
-                            rejection => {
-                              this.debugService.logError(rejection);
-                              throw rejection;
-                            }));
+                        .then((results: any[]) => {
+                          results
+                              .map(result => {
+                                return new Encounter(result);
+                              })
+                              .filter(
+                                  encounter => dateRange.intersection(
+                                                   encounter.period) !== null);
+                        }));
   }
 
   /**
-   * Saves the current image of the graphs rendered as a DocumentReference
+   * Saves the current HTML of the graphs rendered as a DocumentReference
    * (static save).
    * @param html The inner HTML to keep in the Document.
    * @param date The date the note was written on.
    */
-  saveStaticNote(image: HTMLCanvasElement, date: string) {
+  saveStaticNote(html: string, date: string) {
+    html = this.sanitizer.sanitize(SecurityContext.HTML, html);
+    const doc = new DOMParser().parseFromString(html, 'text/html');
+    const xhtml = new XMLSerializer().serializeToString(doc);
     const testData = {
       resource: {
         resourceType: FhirResourceType.DocumentReference,
@@ -267,12 +240,14 @@ export class FhirHttpService extends FhirService {
                         // https://fhir.cerner.com/millennium/dstu2/infrastructure/document-reference/#body-fields
         content: [{
           attachment: {
-            contentType: 'image/png',
-            data: image.toDataURL(),
+            contentType: this.createContentTypeString,
+            data: btoa(xhtml),
           }
         }],
       }
     };
+    // TODO(b/119119092): Currently we only have permissions to write for
+    // Timmy (patient id 4342012), not Wilma
     this.smartApiPromise.then(smartApi => {
       testData['resource']['subject'] = {
         reference: [FhirResourceType.Patient, smartApi.patient.id].join('/')
@@ -296,48 +271,9 @@ export class FhirHttpService extends FhirService {
    * @param dateRange Return all DiagnosticReports that covered any time in this
    *   date range.
    */
+  // TODO(b/119121684): Make API calls to get DiagnosticReports.
   getDiagnosticReports(codeGroup: BCHMicrobioCodeGroup, dateRange: Interval):
       Promise<DiagnosticReport[]> {
-    if (!FhirConfig.microbiology) {
-      console.warn(
-          'No microbiology parameters available in the configuration.');
-      return Promise.resolve([]);
-    }
-    return this.smartApiPromise.then(
-        smartApi => {
-          // YYYY-MM-DD format for dates
-          let callParams = new HttpParams();
-          callParams = callParams.append('patient', smartApi.patient.id);
-          callParams = callParams.append('category', 'microbiology'),
-          callParams = callParams.append(
-              'item-date', 'ge' + dateRange.start.toFormat('yyyy-MM-dd'));
-          callParams = callParams.append(
-              'item-date', 'le' + dateRange.end.toFormat('yyyy-MM-dd'));
-          callParams = callParams.append('format', 'json');
-
-          const httpHeaders = new HttpHeaders({
-            'Content-Type': 'application/json',
-            'Authorization': 'Basic ' + FhirConfig.microbiology.username + ':' +
-                FhirConfig.microbiology.password,
-          });
-
-          return this.http
-              .get(
-                  [
-                    FhirConfig.microbiology.url,
-                    FhirResourceType.DiagnosticReport
-                  ].join('/'),
-                  {headers: httpHeaders, params: callParams})
-              .toPromise()
-              .then((results: any[]) => {
-                return results.map(result => {
-                  return new DiagnosticReport(result);
-                });
-              });
-        },
-        rejection => {
-          this.debugService.logError(rejection);
-          throw rejection;
-        });
+    return Promise.resolve([]);
   }
 }
