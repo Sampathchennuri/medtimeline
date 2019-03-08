@@ -4,7 +4,6 @@
 // license that can be found in the LICENSE file.
 
 import {FhirResourceSet} from '../fhir-resource-set';
-import {fixUnitAbbreviations} from '../unit_utils';
 
 import {AnnotatedObservation} from './annotated-observation';
 
@@ -25,10 +24,10 @@ export class ObservationSet extends FhirResourceSet<AnnotatedObservation> {
   readonly unit: string;
 
   /**
-   * Whether or not any Observations belonging to this ObservationSet contain
-   * qualitative results rather than numerical values.
+   * Whether or not all Observations belonging to this ObservationSet contain
+   * all qualitative results rather than numerical values.
    */
-  readonly anyQualitative: boolean = false;
+  readonly allQualitative: boolean = false;
 
   /**
    * Constructor for ObservationSet.
@@ -68,11 +67,11 @@ export class ObservationSet extends FhirResourceSet<AnnotatedObservation> {
     if (!differentNormalRanges) {
       this.normalRange = firstNormalRange;
     }
-    if (!differentUnits && firstUnit) {
-      this.unit = fixUnitAbbreviations(firstUnit);
+    if (!differentUnits) {
+      this.unit = firstUnit;
     }
 
-    this.anyQualitative = observationList.some(
+    this.allQualitative = observationList.every(
         obs => (obs.observation.result !== null && !obs.observation.value));
   }
 }

@@ -14,8 +14,6 @@ style names with ::ng-deep.  */
 
 .c3-tooltip > tbody > tr > th {
   background-color: rgb(197, 185, 172); /* Boston Warm Gray */
-  width: 100%;
-  word-wrap: break-word;
 }
 
 /* This ensures that the step graph lines do not show circles for individual data points, except for the end points of each line segment. */
@@ -96,8 +94,4 @@ style names with ::ng-deep.  */
 ::ng-deep .order-region {
   fill: rgb(179, 157, 219); /* Secondary color */
   stroke:  rgb(179, 157, 219); /* Secondary color */
-}
-
-::ng-deep .c3-tooltip td {
-  width: 105px;
 }

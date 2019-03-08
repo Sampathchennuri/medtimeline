@@ -7,17 +7,16 @@ import {AfterViewInit, Input, OnChanges, SimpleChanges} from '@angular/core';
 import {DomSanitizer} from '@angular/platform-browser';
 import * as c3 from 'c3';
 import * as d3 from 'd3';
-import {DateTime} from 'luxon';
+import {Color} from 'd3';
+import {DateTime, Interval} from 'luxon';
 import {GraphData} from 'src/app/graphdatatypes/graphdata';
 import {LabeledSeries} from 'src/app/graphdatatypes/labeled-series';
 import {LineGraphData} from 'src/app/graphdatatypes/linegraphdata';
 import {v4 as uuid} from 'uuid';
 
+import {DisplayGrouping} from '../../clinicalconcepts/display-grouping';
+import {getTickMarksForXAxis} from '../../date_utils';
 import {StandardTooltip} from '../tooltips/tooltip';
-
-import {DateTimeXAxis} from './datetimexaxis';
-import {RenderedChart} from './renderedchart';
-import {RenderedCustomizableChart} from './renderedcustomizablechart';
 
 export enum ChartType {
   SCATTER,
@@ -26,25 +25,23 @@ export enum ChartType {
   MICROBIO
 }
 
+const BASE_CHART_HEIGHT_PX = 150;
+
+// The maximum characters for a y-axis tick label.
+export const Y_AXIS_TICK_MAX = 12;
+
 /**
  * Displays a graph. T is the data type the graph is equipped to display.
  */
 export abstract class GraphComponent<T extends GraphData> implements
-    AfterViewInit, OnChanges {
+    OnChanges, AfterViewInit {
   // The x-axis eventlines to display on the chart.
   @Input() eventlines: Array<{[key: string]: number | string}>;
-  /**
-   * The x-axis to use for the chart.
-   */
-  @Input() xAxis: DateTimeXAxis;
+  // Over which time interval the card should display data, stored in UTC time.
+  @Input() dateRange: Interval;
   @Input() data: T;
   // The y-axis label to display.
   @Input() axisLabel: string;
-
-  /**
-   * The x regions to mark on this graph.
-   */
-  @Input() xRegions: any[];
 
   // A unique identifier for the element to bind the graph to.
   chartDivId: string;
@@ -52,57 +49,30 @@ export abstract class GraphComponent<T extends GraphData> implements
   // What type of chart this is. Line chart by default.
   chartType: ChartType = ChartType.LINE;
 
+  // Maps for making a custom legend. We assume that the custom legend does not
+  // change over the lifetime of this rendered graph.
+  private customLegendSet = false;
+
+  // These two variables are different views on the data held in
+  // seriesTodisplayGroup. We need to hold them in separate maps for more
+  // efficient access during legend interaction.
+  readonly displayGroupToSeries = new Map<DisplayGrouping, string[]>();
+
   // Indicating whether are not there are any data points for the current time
   // interval.
-  dataPointsInDateRange: boolean;
+  noDataPointsInDateRange: boolean;
 
   // The rendered chart so that you can apply functions to it.
-  protected renderedChart: RenderedChart|RenderedCustomizableChart;
+  chart: c3.ChartAPI;
 
-  // The rendered chart's configuration.
-  chartConfiguration: c3.ChartConfiguration;
+  // We hold the values of yAxis tick labels and set the values as empty strings
+  // during setup, so that the y axis does not get shifted while getting
+  // displayed.
+  yAxisTickDisplayValues: string[];
 
-  /** The default y-axis configuration for the chart. */
-  readonly yAxisConfig: c3.YAxisConfiguration = {
-    label: {text: '', position: 'outer-middle'},
-    tick: {
-      count: 5,
-      format:
-          d => {
-            // We add padding to our y-axis tick labels so that all y-axes of
-            // the charts rendered on the page can be aligned.
-            return (d)
-                .toLocaleString('en-us', {
-                  minimumFractionDigits: this.data.precision,
-                  maximumFractionDigits: this.data.precision
-                })
-                .trim();
-          }
-    }
-  };
+  labels: string[] = [];
 
-  // A map containing a color for each series displayed on the graph.
-  colorsMap: {[key: string]: string} = {};
-
-  // The default chart type for this chart.
-  chartTypeString: string;
-
-  /**
-   * The base chart height to use when rendering.
-   */
-  private readonly BASE_CHART_HEIGHT_PX = 150;
-
-  /**
-   * The amount of padding to add to the left of the graph. This goes hand in
-   * hand with how we choose to wrap the labels in the rendered chart, so if
-   * Y_AXIS_TICK_MAX changes, this probably needs to change, too.
-   */
-  private readonly Y_AXIS_LEFT_PADDING = 125;
-
-  constructor(
-      readonly sanitizer: DomSanitizer,
-      private readonly renderedConstructor:
-          (axis: DateTimeXAxis, divId: string) => RenderedChart) {
+  constructor(readonly sanitizer: DomSanitizer) {
     // Generate a unique ID for this chart.
     const chartId = uuid();
     // Replace the dashes in the UUID to meet HTML requirements.
@@ -110,143 +80,174 @@ export abstract class GraphComponent<T extends GraphData> implements
     this.chartDivId = 'chart' + chartId.replace(re, '');
   }
 
+  /*
+   * Returns whether or not there are any data points in the series that fall
+   * inside the date range provided.
+   * @param series The LabeledSeries to find data points in the date range.
+   * @param dateRange The date range in which to see if there are any data
+   *     points.
+   */
+  static dataPointsInRange(series: LabeledSeries[], dateRange: Interval):
+      boolean {
+    for (const s of series) {
+      for (const x of s.xValues) {
+        if (dateRange.contains(x)) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
   // The chart can't find the element to bind to until after the view is
   // initialized so we need to regenerate the chart here.
   ngAfterViewInit() {
-    this.generateChart();
+    this.regenerateChart();
   }
 
+  // Any time the bound data changes, we need to regenerate the chart.
   ngOnChanges(changes: SimpleChanges) {
-    if (!this.renderedChart) {
-      return;
-    }
-    if (changes.eventlines) {
-      this.renderedChart.updateEventlines(changes.eventlines.currentValue);
-    }
+    this.regenerateChart();
   }
 
-
-  /**
-   * When the component gets initialized, it calls this function to make the
-   * c3 chart configuration and render it. As outlined in the function below,
-   * there are several steps along the way (please see individual function-level
-   * comments for more details):
-   *
-   * 1) prepareForChartConfiguration: an overrideable function in which
-   * subclasses can get things ready for the chart configuration to get
-   * generated
-   * 2) generateBasicChart: make the chart configuration and store
-   * it in this class
-   * 3) adjustGeneratedChartConfiguration: make any tweaks to the chart
-   *    configuration
-   * 4) Work with the renderedChart class variable to render
-   * the chart via c3 and do some generic styling of the chart
-   * 5) onRender callback runs for the graph generated.
-   */
-
-  generateChart() {
-    if (this.data && this.xAxis) {
-      this.dataPointsInDateRange =
-          this.data.dataPointsInRange(this.xAxis.dateRange);
-      this.prepareForChartConfiguration();
-      this.generateBasicChart();
-      this.adjustGeneratedChartConfiguration();
-      this.renderedChart =
-          this.renderedConstructor(this.xAxis, this.chartDivId);
-      this.renderedChart.generate(
-          this.chartConfiguration, this.dataPointsInDateRange);
+  regenerateChart() {
+    if (this.data && this.dateRange) {
+      this.chart = c3.generate(this.generateChart());
+      // Add an overlay indicating that there are no data points in the date
+      // range.
+      if (this.noDataPointsInDateRange) {
+        const emptyContainer =
+            d3.select('#' + this.chartDivId).select('.c3-text.c3-empty');
+        emptyContainer.text(
+            'No data for ' + this.dateRange.start.toLocaleString() + '-' +
+            this.dateRange.end.toLocaleString());
+        emptyContainer.attr('class', 'c3-text c3-empty noData');
+        // We set the opacity of the y-axis ticks of empty charts to 0 after
+        // setting the tick values. We do this instead of not displaying the
+        // y-axis altogether to ensure that the left padding of the chart is
+        // aligned with all other charts.
+        const yAxisTicks = d3.select('#' + this.chartDivId)
+                               .selectAll('.c3-axis-y')
+                               .selectAll('.tick')
+                               .style('opacity', 0);
+      }
+      this.wrapYAxisLabels();
     }
   }
 
   /**
-   * Lines up any extra things needed to generate the ChartConfiguration.
-   * This may include things like adding atypical data series, custom-setting
-   * colors, etc.
-   */
-  prepareForChartConfiguration() {}
-
-
-  /**
-   * Takes the generated chart configuration (in this.chartConfiguration) and
-   * tweaks it. Override this function to modify the defaults of the chart
-   * configuration.
-   */
-  adjustGeneratedChartConfiguration() {}
-
-  /**
-   * Called every time the graph is rendered. If subclass graphs want to do
-   * something special upon rendering, they can override this function.
-   */
-  onRendered(graphObject): void {}
-
-
-  /**
-   * Sets up a generalized c3.ChartConfig for the data passed in. See the
+   * @param configuration Holds configuration information for the data that
+   *     belongs in this chart.
+   * @param yAxisConfig Custom y-axis configurations.
+   * @param maxXTicks: The maximum number of tick-marks to include on the x-axis
+   * @returns A generalized c3.ChartConfig for the data passed in. See the
    * type definition at:
    * https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/types/c3/index.d.ts
-   * @param maxXTicks: The maximum number of tick-marks to include on the x-axis
    */
-  generateBasicChart(maxXTicks = 10) {
-    this.chartTypeString = 'line';
+  generateBasicChart(yAxisConfig = {}, maxXTicks = 10): c3.ChartConfiguration {
+    const daysInRange = getTickMarksForXAxis(this.dateRange, true);
+    // The ticks with labels displayed.
+    const ticksLabels = new Array<DateTime>();
+    // All ticks displayed.
+    let ticks = new Array<DateTime>();
+    if (Math.floor(daysInRange.length / 2) <= maxXTicks) {
+      // Ticks are separated by 1 day intervals, in which case we show ticks
+      // with no labels at the 12-hour mark.
+      ticks = daysInRange;
+      for (let i = 0; i < daysInRange.length; i += 2) {
+        ticksLabels.push(daysInRange[i]);
+      }
+    } else {
+      // Ticks are separated by intervals > 1 day, in which case we show ticks
+      // with no labels at the day mark.
+      const iteration = Math.ceil(daysInRange.length / maxXTicks);
+      ticksLabels.push(daysInRange[0]);
+      let date = daysInRange[0];
+      while (date <= this.dateRange.end) {
+        date = date.plus({days: iteration});
+        ticksLabels.push(date);
+      }
+      date = daysInRange[0];
+      ticks.push(date);
+      while (date <= this.dateRange.end) {
+        date = date.plus({days: 1});
+        ticks.push(date);
+      }
+    }
 
+    this.labels = ticksLabels.map(function(x) {
+      const date = x.toJSDate();
+      const formatTime = d3.timeFormat('%m/%d %H:%M');
+      return formatTime(date);
+    });
+    const colorsMap = {};
+    for (const key of Object.keys(this.data.c3DisplayConfiguration.columnMap)) {
+      if (this.data.c3DisplayConfiguration.ySeriesLabelToDisplayGroup.get(
+              key)) {
+        const lookupColor: Color =
+            this.data.c3DisplayConfiguration.ySeriesLabelToDisplayGroup.get(key)
+                .fill;
+        colorsMap[key] = lookupColor.toString();
+      }
+    }
+
+    const xAxisConfig: c3.XAxisConfiguration = {
+      type: 'timeseries',
+      min: this.dateRange.start.toLocal().startOf('day').toJSDate(),
+      max: this.dateRange.end.toLocal().endOf('day').toJSDate(),
+      localtime: true,
+      tick: {
+        // To reduce ambiguity we include the hour as well.
+        format: '%m/%d %H:%M',
+        multiline: true,
+        fit: true,
+        values: ticks.map(x => Number(x))
+      }
+    };
+    // If there's more than one series we'll need a legend so make the
+    // graph a bit taller.
+    let chartTypeString = 'line';
     if (this.chartType === ChartType.SCATTER) {
-      this.chartTypeString = 'scatter';
+      chartTypeString = 'scatter';
     } else if (this.chartType !== ChartType.LINE) {
       throw Error('Unsupported chart type: ' + this.chartType);
     }
 
     // Show the y-axis label on the chart.
-    this.yAxisConfig['label'] = {
+    yAxisConfig['label'] = {
       text: (this.axisLabel ? this.axisLabel : ''),
       position: 'outer-middle'
     };
 
     const self = this;
-    const chartConfiguration = {
-      axis: {x: this.xAxis.xAxisConfig, y: this.yAxisConfig},
+    const gridValues: any = this.eventlines ? this.eventlines : [];
+    const graph = {
       bindto: '#' + this.chartDivId,
+      size: {height: BASE_CHART_HEIGHT_PX},
       data: {
         columns: this.data.c3DisplayConfiguration.allColumns,
         xs: this.data.c3DisplayConfiguration.columnMap,
-        type: this.chartTypeString,
-        colors: this.makeColorMap(),
+        type: chartTypeString,
+        colors: colorsMap,
       },
-      grid: {y: {}, x: {}},
+      regions: this.data.xRegions,
+      axis: {x: xAxisConfig, y: yAxisConfig},
       legend: {show: false},  // There's always a custom legend
       line: {connectNull: false},
       onrendered: function() {
-        self.renderedChart.addToRenderQueue(() => {
-          self.renderedChart.setXRegions(self.xRegions);
-        });
-        self.renderedChart.addToRenderQueue(() => {
-          self.renderedChart.updateEventlines(self.eventlines);
-        });
-        self.renderedChart.addToRenderQueue(() => {
-          self.onRendered(this);
-        });
+        self.boldDates();
+        self.wrapYAxisLabels();
+        self.fixOpacity();
+        self.onRendered(this);
       },
-      padding: {left: this.Y_AXIS_LEFT_PADDING},
-      size: {height: this.BASE_CHART_HEIGHT_PX},
-      tooltip: this.setTooltip(),
+      grid: {x: {lines: gridValues}}
     };
 
-    this.chartConfiguration = chartConfiguration;
-  }
+    graph['tooltip'] = this.setTooltip();
 
-  resetChart() {
-    this.renderedChart.resetChart();
-  }
-
-  focusOnSeries(labeledSeries: LabeledSeries[]) {
-    this.renderedChart.focusOnSeries(labeledSeries.map(series => series.label));
-  }
-
-  private makeColorMap() {
-    const colorMap: {[key: string]: string} = {};
-    for (const series of this.data.series) {
-      colorMap[series.label] = series.legendInfo.fill.toString();
-    }
-    return colorMap;
+    this.setCustomLegend(
+        this.data.c3DisplayConfiguration.ySeriesLabelToDisplayGroup);
+    return graph;
   }
 
   /**
@@ -304,4 +305,172 @@ export abstract class GraphComponent<T extends GraphData> implements
       };
     }
   }
+
+  /**
+   * Adds a shaded region on the chart across all x values, between the two
+   * y values specified by yBounds.
+   * @param basicChart The chart to add the region to
+   * @param yBounds The y-bounds of the region to display
+   */
+  addYRegionOnChart(basicChart: c3.ChartConfiguration, yBounds: [
+    number, number
+  ]): c3.ChartConfiguration {
+    if (!basicChart.axis.y.tick) {
+      basicChart.axis.y['tick'] = {};
+    }
+
+    basicChart.axis.y.tick['values'] = yBounds;
+    if (!basicChart['regions']) {
+      basicChart['regions'] = [];
+    }
+    basicChart['regions'].push({axis: 'y', start: yBounds[0], end: yBounds[1]});
+    return basicChart;
+  }
+
+  /**
+   * Sets a custom legend.
+   * To simplify rendering logic, we assume that we only set up a custom legend
+   * once over the lifetime of this graph.
+   *
+   * @param customLegendMap If you want a custom legend grouping multiple series
+   *   together, pass a map with keys of
+   *   series names and values of the ClinicalConcepts they should correspond
+   *   to in a legend.
+   */
+  setCustomLegend(seriesToDisplayGroup: Map<string, DisplayGrouping>) {
+    if (!this.customLegendSet) {
+      for (const [seriesLbl, displayGroup] of Array.from(
+               seriesToDisplayGroup.entries())) {
+        if (!this.displayGroupToSeries.has(displayGroup)) {
+          this.displayGroupToSeries.set(displayGroup, new Array(seriesLbl));
+        } else {
+          const appendedArray =
+              this.displayGroupToSeries.get(displayGroup).concat(seriesLbl);
+          this.displayGroupToSeries.set(displayGroup, appendedArray);
+        }
+      }
+      this.customLegendSet = true;
+    }
+  }
+
+  focusOnDisplayGroup(displayGroup: DisplayGrouping) {
+    this.chart.focus(this.displayGroupToSeries.get(displayGroup));
+  }
+
+  resetChart(displayGroup: DisplayGrouping) {
+    this.chart.revert();
+  }
+
+  /**
+   * Inserts wrapped y-axis tick labels.
+   * TODO(b/123229731): Include this method in chart.onRendered
+   */
+  wrapYAxisLabels() {
+    if (this.yAxisTickDisplayValues) {
+      let currIndex = 0;
+      const self = this;
+      d3.select('#' + this.chartDivId)
+          .selectAll('.c3-axis-y')
+          .selectAll('.tick text')
+          .each(function() {
+            // Get the text element.
+            const text = d3.select(this);
+            // Break up the label by spaces.
+            const words =
+                self.yAxisTickDisplayValues[currIndex].split(/\s+/).reverse();
+            let word;
+            let line = [];
+            const lineHeight = 10;
+            // startDy is an attribute indicating how much to shift the first
+            // line of the label by in the y direction. The standard dy for a
+            // tick text is 3. Figure out the optimal starting dy such that half
+            // of the words are displayed above the tick, and half below.
+            const dyInterval = 6;
+            const startDy = 3 - (Math.floor(words.length / 2) * dyInterval);
+            // Insert the initial tspan.
+            let tspan = text.text(null).append('tspan').attr('x', -9).attr(
+                'dy', startDy);
+            while (word = words.pop()) {
+              line.push(word);
+              tspan.text(line.join(' '));
+              // Add another tspan (another line) if the label is too long.
+              // We don't break up single words that are too long.
+              if (tspan.text().length > Y_AXIS_TICK_MAX &&
+                  tspan.text().includes(' ')) {
+                // Add another line.
+                line.pop();
+                tspan.text(line.join(' '));
+                line = [word];
+                tspan =
+                    text.append('tspan').attr('x', -9).attr('dy', lineHeight);
+              }
+            }
+            // Add the remaining parts of the label to the tspan's text.
+            if (line.length > 0) {
+              tspan.text(line.join(' '));
+            }
+            currIndex++;
+          });
+    }
+  }
+
+  /**
+   * Called every time the graph is rendered. If subclass graphs want to do
+   * something special upon rendering, they can override this function.
+   */
+  onRendered(graphObject): void {}
+
+  /**
+   * Bolds the date portion of each x-axis tick label, and removes unnecessary
+   * labels.
+   */
+  boldDates() {
+    if (this.chart) {
+      const self = this;
+      d3.select('#' + this.chartDivId)
+          .selectAll('.c3-axis-x')
+          .selectAll('.tick text')
+          .each(function() {
+            // We get x (the x position), dy (how much to shift vertically), and
+            // dx (how much to shift horiztontally) of the tspan inside text
+            const dy = d3.select(this).select('tspan').attr('dy');
+            const dx = d3.select(this).select('tspan').attr('dx');
+            const x = d3.select(this).select('tspan').attr('x');
+            const textSplit = d3.select(this).text().split(' ');
+            const text = d3.select(this).text();
+            const tspan = d3.select(this)
+                              .text(null)
+                              .append('tspan')
+                              .attr('x', x)
+                              .attr('dx', dx)
+                              .attr('dy', dy)
+                              .style('font-weight', 'bolder');
+            // Only add the tick label text if it was meant to be
+            // displayed.
+            if (self.labels.length > 0 && self.labels.includes(text)) {
+              tspan.text(
+                  textSplit[0]);  // Set the 'bold' tspan's content as the date.
+              d3.select(this).append('tspan').text(
+                  ' ' + textSplit[1]);  // Add an additional tspan for the time.
+            }
+          });
+    }
+  }
+
+  fixOpacity() {
+    d3.select('#' + this.chartDivId).selectAll('.c3-circle').each(function(d) {
+      if (d3.select(this).style('opacity') === '0.5') {
+        d3.select(this).style('opacity', 1);
+      }
+    });
+  }
+
+  /**
+   * Generates the chart specified by the extending class.
+   * @param containedGraph The graph component to be rendered.
+   * @param chartHeight The height of the chart in pixels.
+   * @returns a ChartConfiguration. See typing definition here:
+   * https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/types/c3/index.d.ts
+   */
+  abstract generateChart(chartHeight?: number): c3.ChartConfiguration;
 }

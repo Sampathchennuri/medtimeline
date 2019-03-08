@@ -14,7 +14,6 @@ import {DateTime, Interval} from 'luxon';
 import {MedicationOrderSet} from '../../fhir-data-classes/medication-order';
 import {StepGraphData} from '../../graphdatatypes/stepgraphdata';
 import {makeMedicationAdministration, makeMedicationOrder} from '../../test_utils';
-import {DateTimeXAxis} from '../graph/datetimexaxis';
 
 import {StepGraphComponent} from './stepgraph.component';
 
@@ -78,12 +77,11 @@ describe('StepGraphComponent', () => {
               [earliestMedicationOrder, latestMedicationOrder]);
           component.data = StepGraphData.fromMedicationOrderSetList(
               [medOrderSet], dateRange, TestBed.get(DomSanitizer));
-          component.xAxis = new DateTimeXAxis(dateRange);
-          component.generateChart();
-          const endpoints =
-              component.chartConfiguration.data.columns.filter((element) => {
-                return (element[0] as string).search('x_endpoint.*') !== -1;
-              });
+          component.dateRange = dateRange;
+          const generatedChart = component.generateChart();
+          const endpoints = generatedChart.data.columns.filter((element) => {
+            return (element[0] as string).search('x_endpoint.*') !== -1;
+          });
 
           // The date range requested is 9/11 to 9/18, while the orders are from
           // 9/10 to 9/12 and 9/14 to 9/30. So the only endpoints that we want

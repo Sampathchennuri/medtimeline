@@ -14,7 +14,6 @@ import {Observation} from '../../fhir-data-classes/observation';
 import {ObservationSet} from '../../fhir-data-classes/observation-set';
 import {LineGraphData} from '../../graphdatatypes/linegraphdata';
 import {makeSampleObservationJson, StubFhirService} from '../../test_utils';
-import {DateTimeXAxis} from '../graph/datetimexaxis';
 import {ChartType} from '../graph/graph.component';
 
 import {LineGraphComponent} from './linegraph.component';
@@ -34,7 +33,7 @@ describe('LineGraphComponent', () => {
       DateTime.utc(1995, 7, 21), DateTime.utc(1995, 7, 22));
   const loincCodeGroup = new LOINCCodeGroup(
       new StubFhirService(), 'lbl',
-      [new LOINCCode('718-7', labResult, 'Hemoglobin', true)], labResult,
+      [new LOINCCode('4090-7', labResult, 'Vanc Pk', true)], labResult,
       ChartType.LINE, [0, 50], false);
   beforeEach(async(() => {
     TestBed
@@ -47,7 +46,7 @@ describe('LineGraphComponent', () => {
   beforeEach(() => {
     fixture = TestBed.createComponent(LineGraphComponent);
     component = fixture.componentInstance;
-    component.xAxis = new DateTimeXAxis(testDateRange);
+    component.dateRange = testDateRange;
     component.data = LineGraphData.fromObservationSetList(
         'label', new Array(obsSet, obsSet), loincCodeGroup,
         TestBed.get(DomSanitizer), []);
@@ -59,25 +58,40 @@ describe('LineGraphComponent', () => {
 
   it('graph x and y values are correctly passed through', () => {
     fixture.detectChanges();
-    component.generateChart();
-    expect(component.chartConfiguration['data']['xs']['Hemoglobin'])
-        .toEqual('x_Hemoglobin');
-    expect(component.chartConfiguration['data']['columns'][0].map(
-               x => x.toString()))
+    const generatedChart = component.generateChart();
+    expect(generatedChart['data']['xs']['Vanc Pk']).toEqual('x_Vanc Pk');
+    expect(generatedChart['data']['columns'][0].map(x => x.toString()))
         .toEqual([
-          'x_Hemoglobin', DateTime.utc(1995, 7, 21).toISO(),
+          'x_Vanc Pk', DateTime.utc(1995, 7, 21).toISO(),
           DateTime.utc(1995, 7, 22).toISO()
         ]);
-    expect(component.chartConfiguration['data']['columns'][1]).toEqual([
-      'Hemoglobin', 15, 20
-    ]);
+    expect(generatedChart['data']['columns'][1]).toEqual(['Vanc Pk', 15, 20]);
   });
+
+  it('region not plotted for normal values when there is more than one series',
+     () => {
+       fixture.detectChanges();
+       const generatedChart = component.generateChart();
+       expect(generatedChart['regions']).toBeUndefined();
+     });
 
   it('should calculate y-axis tick values correctly', () => {
     fixture.detectChanges();
-    component.generateChart();
-    expect(component.chartConfiguration.axis.y.tick.values.length).toEqual(5);
-    expect(component.chartConfiguration.axis.y.tick.values.toString())
+    const generatedChart = component.generateChart();
+    expect(generatedChart.axis.y.tick.values.length).toEqual(5);
+    expect(generatedChart.axis.y.tick.values.toString())
         .toEqual('10,12.5,15,17.5,20');
+  });
+
+  it('region plotted for normal values when there is only one series', () => {
+    fixture.detectChanges();
+    component.data = LineGraphData.fromObservationSetList(
+        'testgraph', new Array(obsSet), loincCodeGroup,
+        TestBed.get(DomSanitizer), []);
+    const generatedChart = component.generateChart();
+    expect(generatedChart['regions'].length).toEqual(1);
+    expect(generatedChart['regions'][0]['axis']).toEqual('y');
+    expect(generatedChart['regions'][0]['start']).toEqual(10);
+    expect(generatedChart['regions'][0]['end']).toEqual(20);
   });
 });

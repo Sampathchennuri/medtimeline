@@ -26,10 +26,7 @@ export class CustomizableData extends GraphData {
        */
       readonly annotations: Map<number, CustomizableGraphAnnotation>,
       regions?: any[]) {
-    super(
-        [series], undefined,  // tooltip map
-        undefined,            // tooltip key function
-        regions);
+    super([series], new Map(), undefined, undefined, regions);
     this.annotations = annotations;
     this.yAxisDisplayBounds = [0, 10];
   }
@@ -64,14 +61,17 @@ export class CustomizableData extends GraphData {
 
   /**
    * Adds a point to the series in this CustomizableData object.
-   * @param annotation: The annotation to add in to the graph.
+   * @param date The date for this point.
+   * @param yValue The y-value for this point.
+   * @param annotation The CustomizableGraphAnnotation for this point.
+   * @returns a new CustomizableData with the addition of this point.
    */
-  addPointToSeries(annotation: CustomizableGraphAnnotation) {
+  addPointToSeries(yValue: number, annotation: CustomizableGraphAnnotation) {
     // This method assumes there is only 1 series.
     this.series[0].xValues.push(annotation.timestamp);
-    this.series[0].yValues.push(0);
+    this.series[0].yValues.push(yValue);
     this.annotations.set(annotation.timestamp.toMillis(), annotation);
-    this.c3DisplayConfiguration = this.generateColumnMapping();
+    this.c3DisplayConfiguration = this.generateColumnMapping(new Map());
   }
 
   /**
@@ -85,6 +85,6 @@ export class CustomizableData extends GraphData {
     this.series[0].xValues.splice(index, 1);
     this.series[0].yValues.splice(index, 1);
     this.annotations.delete(date.toMillis());
-    this.c3DisplayConfiguration = this.generateColumnMapping();
+    this.c3DisplayConfiguration = this.generateColumnMapping(new Map());
   }
 }
