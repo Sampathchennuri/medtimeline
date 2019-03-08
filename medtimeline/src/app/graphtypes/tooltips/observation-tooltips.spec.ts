@@ -11,7 +11,7 @@ import {AnnotatedObservation} from 'src/app/fhir-data-classes/annotated-observat
 import {Observation} from 'src/app/fhir-data-classes/observation';
 import {makeSampleDiscreteObservationJson} from 'src/app/test_utils';
 
-import {DiscreteObservationTooltip, GenericAbnormalTooltip, GenericAnnotatedObservationTooltip} from './observation-tooltips';
+import {DiscreteObservationTooltip, GenericAnnotatedObservationTooltip} from './observation-tooltips';
 import {Tooltip} from './tooltip';
 
 describe('DiscreteObservationTooltip', () => {
@@ -48,9 +48,9 @@ describe('DiscreteObservationTooltip', () => {
             '<tr><th colspan="2">' +
             Tooltip.formatTimestamp(DateTime.utc(1988, 3, 23)) + '</th></tr>' +
             '<tr>' +
-            '<td class="name">Vanc pk</td><td class="value">blue</td></tr>' +
+            '<td class="name">Vanco Pk</td><td class="value">blue</td></tr>' +
             '<tr>' +
-            '<td class="name">Vanc pk</td><td class="value">green</td></tr>' +
+            '<td class="name">Vanco Pk</td><td class="value">green</td></tr>' +
             '</tbody></table>');
   });
 });
@@ -90,35 +90,9 @@ describe('GenericObservationTooltip', () => {
             '<tr><th colspan="2">' +
             Tooltip.formatTimestamp(DateTime.utc(1988, 3, 23)) + '</th></tr>' +
             '<tr>' +
-            '<td class="name">Vanc pk</td><td class="value">blue</td></tr>' +
+            '<td class="name">Vanco Pk</td><td class="value">blue</td></tr>' +
             '<tr>' +
-            '<td class="name">Vanc pk</td><td class="value">green</td></tr>' +
-            '</tbody></table>');
-  });
-});
-
-
-describe('GenericAbnormalTooltip', () => {
-  const params = {};
-  params['label'] = 'Hemoglobin';
-  params['value'] = 100;
-  params['timestamp'] = 575078400000;
-
-  beforeEach(async(() => {
-    TestBed.configureTestingModule({}).compileComponents();
-  }));
-
-  it('should generate tooltip text', () => {
-    const tooltipText = new GenericAbnormalTooltip(true, d3.rgb(12, 67, 199))
-                            .getTooltip(params, TestBed.get(DomSanitizer));
-    expect(tooltipText).toBeDefined();
-    expect(tooltipText)
-        .toEqual(
-            '<table class="c3-tooltip">' +
-            '<tbody>' +
-            '<tr><th colspan="2">' +
-            Tooltip.formatTimestamp(DateTime.utc(1988, 3, 22)) + '</th></tr>' +
-            '<tr><th colspan="2">Caution: value outside normal range</th></tr>' +
+            '<td class="name">Vanco Pk</td><td class="value">green</td></tr>' +
             '</tbody></table>');
   });
 });

@@ -3,9 +3,10 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-import {Component, forwardRef} from '@angular/core';
+import {Component, forwardRef, Input} from '@angular/core';
 import {DomSanitizer} from '@angular/platform-browser';
 
+import {ChartType} from '../graph/graph.component';
 import {GraphComponent} from '../graph/graph.component';
 import {LineGraphComponent} from '../linegraph/linegraph.component';
 
@@ -21,6 +22,6 @@ import {LineGraphComponent} from '../linegraph/linegraph.component';
 export class ScatterplotComponent extends LineGraphComponent {
   constructor(sanitizer: DomSanitizer) {
     super(sanitizer);
-    this.chartTypeString = 'scatter';
+    this.chartType = ChartType.SCATTER;
   }
 }
