@@ -3,31 +3,27 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-import {Component, EventEmitter, Inject, Output} from '@angular/core';
-import {MatDialog} from '@angular/material/dialog';
-import {UI_CONSTANTS_TOKEN} from 'src/constants';
+import {Component, EventEmitter, Output} from '@angular/core';
+import {MatDialog} from '@angular/material';
 
 import {environment} from '../../environments/environment';
 import {DisplayGrouping} from '../clinicalconcepts/display-grouping';
-import {ResourceCodeManager} from '../clinicalconcepts/resource-code-manager';
-import {AxisGroup} from '../graphtypes/axis-group';
+import {ResourceCodeManager, ResourceCodesForCard} from '../clinicalconcepts/resource-code-manager';
 import {HelpDialogComponent} from '../help-dialog/help-dialog.component';
 
 @Component({
   selector: 'app-timeline-toolbar',
   templateUrl: './timeline-toolbar.component.html',
-  styleUrls: ['../cardcontainer/cardcontainer.component.css']
 })
 export class TimelineToolbarComponent {
-  readonly displayGroupings: Array<[DisplayGrouping, AxisGroup[]]>;
+  readonly displayGroupings: Array<[DisplayGrouping, ResourceCodesForCard[]]>;
   readonly showMockDataMessage = environment.useMockServer;
 
   @Output() saveSnapshot = new EventEmitter<null>();
   @Output() addTextbox = new EventEmitter<null>();
 
   constructor(
-      resourceCodeManager: ResourceCodeManager, private dialog: MatDialog,
-      @Inject(UI_CONSTANTS_TOKEN) readonly uiConstants: any) {
+      resourceCodeManager: ResourceCodeManager, private dialog: MatDialog) {
     const displayGroups = resourceCodeManager.getDisplayGroupMapping();
     this.displayGroupings = Array.from(displayGroups.entries());
   }
