@@ -4,7 +4,6 @@
 // license that can be found in the LICENSE file.
 
 import 'fhirclient';
-
 import {Component, OnInit} from '@angular/core';
 import {ActivatedRoute} from '@angular/router';
 import {Router} from '@angular/router';
@@ -25,62 +24,29 @@ declare var FHIR: any;
 export class FhirLaunchComponent implements OnInit {
   error = false;
 
-  scope: string = [
+  private scope: string = [
     'launch', 'patient/Observation.read', 'patient/Patient.read',
     'patient/MedicationOrder.read', 'patient/MedicationAdministration.read',
     'patient/DocumentReference.read', 'patient/DocumentReference.write',
     'patient/Encounter.read'
   ].join(' ');
 
-  // We hold these variables in-class for authentication debugging.
-  clientId: string;
-  baseURL: string;
-  redirectURL: string;
-  useDebugger: boolean;
-  parameters = new Array<string>();
-
   constructor(private router: Router, private route: ActivatedRoute) {}
 
   ngOnInit() {
     if (environment.useMockServer) {
-      this.router.navigate(['setup']);
+      this.router.navigate(['']);
     } else {
-      this.useDebugger = environment.useDebugger;
-
-      this.route.queryParams.subscribe(params => {
-        const state = params['state'];
-        const code = params['code'];
-        if (state && code) {
-          // Navigate to the setup page, passing the code & state parameters
-          // along with the URL.
-          this.router.navigateByUrl('/setup?code=' + code + '&state=' + state);
-        } else {
-          if (this.useDebugger) {
-            this.clientId = FhirConfig.credentials.client_id;
-            this.baseURL = FhirConfig.url.baseURL;
-            this.redirectURL = FhirConfig.url.redirectURL;
-            this.route.queryParams.subscribe(pms => {
-              this.parameters.push(JSON.stringify(pms));
-            });
-            return;
-          }
-
-          this.beginAuthenticationFlow();
-        }
-      });
-    }
-  }
-
-  beginAuthenticationFlow() {
-    const clientId = FhirConfig.credentials.client_id;
-    if (!clientId) {
-      this.error = true;
-    } else {
-      FHIR.oauth2.authorize({
-        'client_id': clientId,
-        'scope': this.scope,
-        'redirect_uri': FhirConfig.url.redirectURL
-      });
+      const clientId = FhirConfig.credentials.client_id;
+      if (!clientId) {
+        this.error = true;
+      } else {
+        FHIR.oauth2.authorize({
+          'client_id': clientId,
+          'scope': this.scope,
+          'redirect_uri': FhirConfig.url.redirectURL
+        });
+      }
     }
   }
 }

@@ -3,23 +3,20 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-import {Input, OnChanges, SimpleChanges} from '@angular/core';
+import {AfterViewInit, Input, OnChanges, SimpleChanges} from '@angular/core';
 import {DomSanitizer} from '@angular/platform-browser';
-import {ChartDataSets, ChartOptions} from 'chart.js';
-import {ChartXAxe} from 'chart.js';
-import * as pluginAnnotations from 'chartjs-plugin-annotation';
-import {DateTime, Interval, IntervalObject} from 'luxon';
-import {Color} from 'ng2-charts';
+import * as c3 from 'c3';
+import * as d3 from 'd3';
+import {Color} from 'd3';
+import {DateTime, Interval} from 'luxon';
 import {GraphData} from 'src/app/graphdatatypes/graphdata';
 import {LabeledSeries} from 'src/app/graphdatatypes/labeled-series';
 import {LineGraphData} from 'src/app/graphdatatypes/linegraphdata';
 import {v4 as uuid} from 'uuid';
 
+import {DisplayGrouping} from '../../clinicalconcepts/display-grouping';
+import {getTickMarksForXAxis} from '../../date_utils';
 import {StandardTooltip} from '../tooltips/tooltip';
-
-import {DateTimeXAxis} from './datetimexaxis';
-import {RenderedChart} from './renderedchart';
-import {RenderedCustomizableChart} from './renderedcustomizablechart';
 
 export enum ChartType {
   SCATTER,
@@ -28,217 +25,52 @@ export enum ChartType {
   MICROBIO
 }
 
+const BASE_CHART_HEIGHT_PX = 150;
+
+// The maximum characters for a y-axis tick label.
+export const Y_AXIS_TICK_MAX = 12;
+
 /**
  * Displays a graph. T is the data type the graph is equipped to display.
  */
-export abstract class GraphComponent<T extends GraphData> implements OnChanges {
-  /** Dummy data series label. */
-  private static readonly DEFAULT_BLANK_DATA_LABEL = 'blankdatalabel';
-
-  /**
-   * The amount of padding to add to the left of the graph. This goes hand in
-   * hand with how we choose to wrap the labels in the rendered chart, so if
-   * Y_AXIS_TICK_MAX changes, this probably needs to change, too.
-   */
-  private static readonly Y_AXIS_LEFT_PADDING = 125;
-
-  /** Line weights for emphasized and non-emphasized line graphs. */
-  private static readonly THICK_LINE = 3;
-  private static readonly THIN_LINE = 1;
-
-  /** Constants for x and y axis names. */
-  static readonly Y_AXIS_ID = 'y-axis-0';
-  static readonly X_AXIS_ID = 'x-axis-0';
-
-  /** The base chart height to use when rendering. */
-  readonly BASE_CHART_HEIGHT_PX = 150;
-
-  /*****************************************
-   * Bound input variables
-   */
-
-  /** The x-axis eventlines to display on the chart. */
+export abstract class GraphComponent<T extends GraphData> implements
+    OnChanges, AfterViewInit {
+  // The x-axis eventlines to display on the chart.
   @Input() eventlines: Array<{[key: string]: number | string}>;
-  /** The x-axis to use for the chart. */
+  // Over which time interval the card should display data, stored in UTC time.
   @Input() dateRange: Interval;
-  /** The y-axis label to display. */
-  @Input() axisLabel: string;
-  /** The graph data to show.  */
   @Input() data: T;
-  /** The x regions to mark on this graph. */
-  @Input() xRegions: Array<[DateTime, DateTime]>;
+  // The y-axis label to display.
+  @Input() axisLabel: string;
 
-  /*****************************************
-   * Variables the chart.js directive binds to.
-   */
-
-  /** Plugins for chart.js. */
-  lineChartPlugins = [pluginAnnotations];
-
-  /**
-   * Sets the tooltip for the graph.
-   * If the class has a tooltipMap set, then we look up the tooltip from that
-   * map. If there's no tooltipMap, then we return a simple formatted tooltip
-   * of just the string representing the data plus the appropriate units for
-   * a linegraph, or just the unedited value if it's a different kind of graph.
-   */
-  readonly customTooltips = (tooltipContext) => {
-    // Get, or construct, a tooltip element to put all the tooltip HTML into.
-    const canvas = document.getElementById(this.chartDivId);
-    const tooltipEl = this.findOrCreateTooltipElement(canvas);
-
-    // Hide the element if there is no tooltip-- this function gets called
-    // back whether you're hovering over an element or not.
-    if (tooltipContext.opacity === 0) {
-      tooltipEl.style.opacity = '0';
-      return;
-    }
-
-    if (tooltipContext.body) {
-      tooltipEl.innerHTML = this.getTooltipInnerHtml(tooltipContext);
-    }
-
-    // Display the tooltip lined up with the data point.
-    const positionY = canvas.offsetTop;
-    const positionX = canvas.offsetLeft;
-    tooltipEl.style.opacity = '1';
-    tooltipEl.style.left = positionX + tooltipContext.caretX + 'px';
-    tooltipEl.style.top = positionY + tooltipContext.caretY + 'px';
-  };
-
-  // The bindings are unhappy when you provide an empty data array, so we
-  // give it a fake label.
-  chartData: ChartDataSets[] = [
-    {data: [], label: GraphComponent.DEFAULT_BLANK_DATA_LABEL},
-  ];
-
-  private generateXAxis(): ChartXAxe {
-    return {
-      id: GraphComponent.X_AXIS_ID,
-      type: 'time',
-      gridLines: {
-        display: false,
-      },
-      time: {
-        // This sets the bounds of the x-axis. The default values of 0 and 10
-        // are nonsensical but necessary since the graph is first rendered
-        // before xAxis is bound.
-        min: this.dateRange ? this.dateRange.start.toISO() :
-                              DateTime.utc().toISO(),
-        max: this.dateRange ? this.dateRange.end.toISO() :
-                              DateTime.utc().toISO(),
-        displayFormats: {
-          minute: 'MM/DD H:mm',
-          hour: 'MM/DD H:mm',
-          day: 'MM/DD H:mm',
-          week: 'MM/DD H:mm',
-          month: 'MM/DD H:mm',
-          quarter: 'MM/DD H:mm',
-          year: 'MM/DD H:mm'
-        }
-      },
-      ticks: {
-        // Only show as many tick labels will fit neatly on the axis.
-        autoSkip: true,
-      }
-    };
-  }
-
-  chartOptions:
-      (ChartOptions&{annotation: any}) = {
-        // Draw straight lines between points instead of curves.
-        elements: {line: {tension: 0}},
-        layout: {padding: {top: 15}},
-        // We make our own legend so we don't show the built-in one.
-        legend: {display: false},
-        scales:
-            {
-              xAxes: [{
-                id: GraphComponent.X_AXIS_ID,
-                type: 'time',
-                gridLines: {
-                  display: false,
-                },
-                time: {
-                  // This sets the bounds of the x-axis. The default values of
-                  // 0 and 10
-                  // are nonsensical but necessary since the graph is first
-                  // rendered
-                  // before xAxis is bound.
-                  min: this.dateRange? this.dateRange.start.toISO():
-                         DateTime.utc().toISO(),
-                  max: this.dateRange? this.dateRange.end.toISO():
-                         DateTime.utc().toISO()
-                },
-                ticks: {
-                  // Only show as many tick labels will fit neatly on the axis.
-                  autoSkip: true,
-                }
-              }],
-              yAxes:
-                  [
-                    {
-                      id: GraphComponent.Y_AXIS_ID,
-                      position: 'left',
-                      gridLines: {
-                        display: false,
-                      },
-                      scaleLabel: {
-                        display: true,
-                        labelString: '',
-                      },
-                      ticks:
-                          {
-                            autoSkip: true,
-                            callback:
-                                (value, index, values) => {
-                                  return (value).toLocaleString('en-us', {
-                                    minimumFractionDigits: this.data.precision,
-                                    maximumFractionDigits: this.data.precision
-                                  });
-                                }
-                          }
-                    },
-                  ]
-            },
-        responsive: false,
-        maintainAspectRatio: false,
-        // Set up the custom callback for the tooltips.
-        tooltips: {
-          enabled: false,
-          mode: 'x',
-          position: 'nearest',
-          custom: this.customTooltips
-        },
-        annotation: {
-          // Array of annotation configuration objects to be filled in.
-          annotations: []
-        },
-        /** The settings below are just for better performance. */
-        animation: {duration: 0},
-        hover: {animationDuration: 0},
-        responsiveAnimationDuration: 0
-      };
-
-  /**
-   * The sequence of colors to use for rendering the LabeledSeries for this
-   * chart's data. The ordering of this color array should be in parallel
-   * to the ordering of the LabeledSeries in this chart's data.
-   */
-  chartColors: Color[] = [];
-
-  /** A unique identifier for the element to bind the graph to. */
+  // A unique identifier for the element to bind the graph to.
   chartDivId: string;
 
-  /**
-   * The default chart type for this chart. The Angular directive binds
-   * to this string to tell chart.js which chart type to use.
-   */
-  chartTypeString = 'line';
+  // What type of chart this is. Line chart by default.
+  chartType: ChartType = ChartType.LINE;
+
+  // Maps for making a custom legend. We assume that the custom legend does not
+  // change over the lifetime of this rendered graph.
+  private customLegendSet = false;
+
+  // These two variables are different views on the data held in
+  // seriesTodisplayGroup. We need to hold them in separate maps for more
+  // efficient access during legend interaction.
+  readonly displayGroupToSeries = new Map<DisplayGrouping, string[]>();
 
   // Indicating whether are not there are any data points for the current time
   // interval.
-  private dataPointsInDateRange: boolean;
+  noDataPointsInDateRange: boolean;
+
+  // The rendered chart so that you can apply functions to it.
+  chart: c3.ChartAPI;
+
+  // We hold the values of yAxis tick labels and set the values as empty strings
+  // during setup, so that the y axis does not get shifted while getting
+  // displayed.
+  yAxisTickDisplayValues: string[];
+
+  labels: string[] = [];
 
   constructor(readonly sanitizer: DomSanitizer) {
     // Generate a unique ID for this chart.
@@ -248,64 +80,339 @@ export abstract class GraphComponent<T extends GraphData> implements OnChanges {
     this.chartDivId = 'chart' + chartId.replace(re, '');
   }
 
-  ngOnInit() {
-    this.generateChart();
+  /*
+   * Returns whether or not there are any data points in the series that fall
+   * inside the date range provided.
+   * @param series The LabeledSeries to find data points in the date range.
+   * @param dateRange The date range in which to see if there are any data
+   *     points.
+   */
+  static dataPointsInRange(series: LabeledSeries[], dateRange: Interval):
+      boolean {
+    for (const s of series) {
+      for (const x of s.xValues) {
+        if (dateRange.contains(x)) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
+  // The chart can't find the element to bind to until after the view is
+  // initialized so we need to regenerate the chart here.
+  ngAfterViewInit() {
+    this.regenerateChart();
+  }
+
+  // Any time the bound data changes, we need to regenerate the chart.
   ngOnChanges(changes: SimpleChanges) {
-    if (changes.eventlines && this.renderedChart) {
-      this.renderedChart.updateEventlines(changes.eventlines.currentValue);
-    }
-    if (changes.dateRange) {
-      this.chartOptions.scales.xAxes = [this.generateXAxis()];
-    }
+    this.regenerateChart();
   }
 
-  chartConfiguration: any;
-  renderedChart: RenderedChart|RenderedCustomizableChart;
-
-  /**
-   * When the component gets initialized, it calls this function to make the
-   * c3 chart configuration and render it. As outlined in the function below,
-   * there are several steps along the way (please see individual function-level
-   * comments for more details):
-   *
-   * 1) prepareForChartConfiguration: an overrideable function in which
-   * subclasses can get things ready for the chart configuration to get
-   * generated
-   * 2) generateBasicChart: make the chart configuration and store
-   * it in this class
-   * 3) adjustGeneratedChartConfiguration: make any tweaks to the chart
-   *    configuration
-   * 4) Work with the renderedChart class variable to render
-   * the chart via c3 and do some generic styling of the chart
-   * 5) onRender callback runs for the graph generated.
-   */
-
-  generateChart(focusOnSeries?: LabeledSeries[]) {
+  regenerateChart() {
     if (this.data && this.dateRange) {
-      this.chartData =
-          [{data: [], label: GraphComponent.DEFAULT_BLANK_DATA_LABEL}];
-      this.dataPointsInDateRange = this.data.dataPointsInRange(this.dateRange);
-      this.prepareForChartConfiguration();
-      this.generateBasicChart(focusOnSeries);
-      this.adjustGeneratedChartConfiguration();
+      this.chart = c3.generate(this.generateChart());
+      // Add an overlay indicating that there are no data points in the date
+      // range.
+      if (this.noDataPointsInDateRange) {
+        const emptyContainer =
+            d3.select('#' + this.chartDivId).select('.c3-text.c3-empty');
+        emptyContainer.text(
+            'No data for ' + this.dateRange.start.toLocaleString() + '-' +
+            this.dateRange.end.toLocaleString());
+        emptyContainer.attr('class', 'c3-text c3-empty noData');
+        // We set the opacity of the y-axis ticks of empty charts to 0 after
+        // setting the tick values. We do this instead of not displaying the
+        // y-axis altogether to ensure that the left padding of the chart is
+        // aligned with all other charts.
+        const yAxisTicks = d3.select('#' + this.chartDivId)
+                               .selectAll('.c3-axis-y')
+                               .selectAll('.tick')
+                               .style('opacity', 0);
+      }
+      this.wrapYAxisLabels();
     }
   }
 
   /**
-   * Lines up any extra things needed to generate the ChartConfiguration.
-   * This may include things like adding atypical data series, custom-setting
-   * colors, etc.
+   * @param configuration Holds configuration information for the data that
+   *     belongs in this chart.
+   * @param yAxisConfig Custom y-axis configurations.
+   * @param maxXTicks: The maximum number of tick-marks to include on the x-axis
+   * @returns A generalized c3.ChartConfig for the data passed in. See the
+   * type definition at:
+   * https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/types/c3/index.d.ts
    */
-  prepareForChartConfiguration() {}
+  generateBasicChart(yAxisConfig = {}, maxXTicks = 10): c3.ChartConfiguration {
+    const daysInRange = getTickMarksForXAxis(this.dateRange, true);
+    // The ticks with labels displayed.
+    const ticksLabels = new Array<DateTime>();
+    // All ticks displayed.
+    let ticks = new Array<DateTime>();
+    if (Math.floor(daysInRange.length / 2) <= maxXTicks) {
+      // Ticks are separated by 1 day intervals, in which case we show ticks
+      // with no labels at the 12-hour mark.
+      ticks = daysInRange;
+      for (let i = 0; i < daysInRange.length; i += 2) {
+        ticksLabels.push(daysInRange[i]);
+      }
+    } else {
+      // Ticks are separated by intervals > 1 day, in which case we show ticks
+      // with no labels at the day mark.
+      const iteration = Math.ceil(daysInRange.length / maxXTicks);
+      ticksLabels.push(daysInRange[0]);
+      let date = daysInRange[0];
+      while (date <= this.dateRange.end) {
+        date = date.plus({days: iteration});
+        ticksLabels.push(date);
+      }
+      date = daysInRange[0];
+      ticks.push(date);
+      while (date <= this.dateRange.end) {
+        date = date.plus({days: 1});
+        ticks.push(date);
+      }
+    }
+
+    this.labels = ticksLabels.map(function(x) {
+      const date = x.toJSDate();
+      const formatTime = d3.timeFormat('%m/%d %H:%M');
+      return formatTime(date);
+    });
+    const colorsMap = {};
+    for (const key of Object.keys(this.data.c3DisplayConfiguration.columnMap)) {
+      if (this.data.c3DisplayConfiguration.ySeriesLabelToDisplayGroup.get(
+              key)) {
+        const lookupColor: Color =
+            this.data.c3DisplayConfiguration.ySeriesLabelToDisplayGroup.get(key)
+                .fill;
+        colorsMap[key] = lookupColor.toString();
+      }
+    }
+
+    const xAxisConfig: c3.XAxisConfiguration = {
+      type: 'timeseries',
+      min: this.dateRange.start.toLocal().startOf('day').toJSDate(),
+      max: this.dateRange.end.toLocal().endOf('day').toJSDate(),
+      localtime: true,
+      tick: {
+        // To reduce ambiguity we include the hour as well.
+        format: '%m/%d %H:%M',
+        multiline: true,
+        fit: true,
+        values: ticks.map(x => Number(x))
+      }
+    };
+    // If there's more than one series we'll need a legend so make the
+    // graph a bit taller.
+    let chartTypeString = 'line';
+    if (this.chartType === ChartType.SCATTER) {
+      chartTypeString = 'scatter';
+    } else if (this.chartType !== ChartType.LINE) {
+      throw Error('Unsupported chart type: ' + this.chartType);
+    }
+
+    // Show the y-axis label on the chart.
+    yAxisConfig['label'] = {
+      text: (this.axisLabel ? this.axisLabel : ''),
+      position: 'outer-middle'
+    };
+
+    const self = this;
+    const gridValues: any = this.eventlines ? this.eventlines : [];
+    const graph = {
+      bindto: '#' + this.chartDivId,
+      size: {height: BASE_CHART_HEIGHT_PX},
+      data: {
+        columns: this.data.c3DisplayConfiguration.allColumns,
+        xs: this.data.c3DisplayConfiguration.columnMap,
+        type: chartTypeString,
+        colors: colorsMap,
+      },
+      regions: this.data.xRegions,
+      axis: {x: xAxisConfig, y: yAxisConfig},
+      legend: {show: false},  // There's always a custom legend
+      line: {connectNull: false},
+      onrendered: function() {
+        self.boldDates();
+        self.wrapYAxisLabels();
+        self.fixOpacity();
+        self.onRendered(this);
+      },
+      grid: {x: {lines: gridValues}}
+    };
+
+    graph['tooltip'] = this.setTooltip();
+
+    this.setCustomLegend(
+        this.data.c3DisplayConfiguration.ySeriesLabelToDisplayGroup);
+    return graph;
+  }
 
   /**
-   * Takes the generated chart configuration (in this.chartConfiguration) and
-   * tweaks it. Override this function to modify the defaults of the chart
-   * configuration.
+   * Sets the tooltip for the graph.
+   * If the class has a tooltipMap set, then we look up the tooltip from that
+   * map. If there's no tooltipMap, then we return a simple formatted tooltip
+   * of just the string representing the data plus the appropriate units for
+   * a linegraph, or just the unedited value if it's a different kind of graph.
    */
-  adjustGeneratedChartConfiguration() {}
+  setTooltip(): {} {
+    const self = this;
+    if (this.data && this.data.tooltipMap) {
+      return {
+        contents: (
+            pointData: any[], defaultTitleFormat, defaultValueFormat,
+            color) => {
+          // pointData will hold every point for the x-value you're hovering
+          // on. We squish together all those data points preemptively in
+          // our tooltip creation so that we just find the index of the
+          // tooltip based on the first point's x-value.
+          const value = pointData[0];
+          const timestampKey =
+              DateTime.fromJSDate(value.x).toMillis().toString();
+          // Our data class may provide a tooltip key function that will
+          // get the correct identifier from the data point. If it does,
+          // we'll use that, but by default, the key is the timestamp
+          // of the data point.
+          const keyToUse = this.data.tooltipKeyFn ?
+              this.data.tooltipKeyFn(value) :
+              timestampKey;
+          // If something bad happens and we don't have a tooltip for the
+          // key, return an empty string so that there will just be no
+          // tooltip.
+          if (!this.data.tooltipMap.has(keyToUse)) {
+            return new StandardTooltip(
+                       pointData, color,
+                       self.data instanceof LineGraphData ? self.data.unit : '')
+                .getTooltip(undefined, this.sanitizer);
+          }
+          return this.data.tooltipMap.get(keyToUse);
+        }
+      };
+    } else {
+      return {
+        format: {
+          value: (value, ratio, id, index) => {
+            if (self.data instanceof LineGraphData) {
+              return (
+                  d3.format(',.' + self.data.precision + 'f')(value) + ' ' +
+                  self.data.unit);
+            }
+            return value;
+          }
+        }
+      };
+    }
+  }
+
+  /**
+   * Adds a shaded region on the chart across all x values, between the two
+   * y values specified by yBounds.
+   * @param basicChart The chart to add the region to
+   * @param yBounds The y-bounds of the region to display
+   */
+  addYRegionOnChart(basicChart: c3.ChartConfiguration, yBounds: [
+    number, number
+  ]): c3.ChartConfiguration {
+    if (!basicChart.axis.y.tick) {
+      basicChart.axis.y['tick'] = {};
+    }
+
+    basicChart.axis.y.tick['values'] = yBounds;
+    if (!basicChart['regions']) {
+      basicChart['regions'] = [];
+    }
+    basicChart['regions'].push({axis: 'y', start: yBounds[0], end: yBounds[1]});
+    return basicChart;
+  }
+
+  /**
+   * Sets a custom legend.
+   * To simplify rendering logic, we assume that we only set up a custom legend
+   * once over the lifetime of this graph.
+   *
+   * @param customLegendMap If you want a custom legend grouping multiple series
+   *   together, pass a map with keys of
+   *   series names and values of the ClinicalConcepts they should correspond
+   *   to in a legend.
+   */
+  setCustomLegend(seriesToDisplayGroup: Map<string, DisplayGrouping>) {
+    if (!this.customLegendSet) {
+      for (const [seriesLbl, displayGroup] of Array.from(
+               seriesToDisplayGroup.entries())) {
+        if (!this.displayGroupToSeries.has(displayGroup)) {
+          this.displayGroupToSeries.set(displayGroup, new Array(seriesLbl));
+        } else {
+          const appendedArray =
+              this.displayGroupToSeries.get(displayGroup).concat(seriesLbl);
+          this.displayGroupToSeries.set(displayGroup, appendedArray);
+        }
+      }
+      this.customLegendSet = true;
+    }
+  }
+
+  focusOnDisplayGroup(displayGroup: DisplayGrouping) {
+    this.chart.focus(this.displayGroupToSeries.get(displayGroup));
+  }
+
+  resetChart(displayGroup: DisplayGrouping) {
+    this.chart.revert();
+  }
+
+  /**
+   * Inserts wrapped y-axis tick labels.
+   * TODO(b/123229731): Include this method in chart.onRendered
+   */
+  wrapYAxisLabels() {
+    if (this.yAxisTickDisplayValues) {
+      let currIndex = 0;
+      const self = this;
+      d3.select('#' + this.chartDivId)
+          .selectAll('.c3-axis-y')
+          .selectAll('.tick text')
+          .each(function() {
+            // Get the text element.
+            const text = d3.select(this);
+            // Break up the label by spaces.
+            const words =
+                self.yAxisTickDisplayValues[currIndex].split(/\s+/).reverse();
+            let word;
+            let line = [];
+            const lineHeight = 10;
+            // startDy is an attribute indicating how much to shift the first
+            // line of the label by in the y direction. The standard dy for a
+            // tick text is 3. Figure out the optimal starting dy such that half
+            // of the words are displayed above the tick, and half below.
+            const dyInterval = 6;
+            const startDy = 3 - (Math.floor(words.length / 2) * dyInterval);
+            // Insert the initial tspan.
+            let tspan = text.text(null).append('tspan').attr('x', -9).attr(
+                'dy', startDy);
+            while (word = words.pop()) {
+              line.push(word);
+              tspan.text(line.join(' '));
+              // Add another tspan (another line) if the label is too long.
+              // We don't break up single words that are too long.
+              if (tspan.text().length > Y_AXIS_TICK_MAX &&
+                  tspan.text().includes(' ')) {
+                // Add another line.
+                line.pop();
+                tspan.text(line.join(' '));
+                line = [word];
+                tspan =
+                    text.append('tspan').attr('x', -9).attr('dy', lineHeight);
+              }
+            }
+            // Add the remaining parts of the label to the tspan's text.
+            if (line.length > 0) {
+              tspan.text(line.join(' '));
+            }
+            currIndex++;
+          });
+    }
+  }
 
   /**
    * Called every time the graph is rendered. If subclass graphs want to do
@@ -313,145 +420,57 @@ export abstract class GraphComponent<T extends GraphData> implements OnChanges {
    */
   onRendered(graphObject): void {}
 
-
   /**
-   * Sets up a generalized c3.ChartConfig for the data passed in. See the
-   * type definition at:
-   * https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/types/c3/index.d.ts
-   * @param maxXTicks: The maximum number of tick-marks to include on the x-axis
+   * Bolds the date portion of each x-axis tick label, and removes unnecessary
+   * labels.
    */
-  private generateBasicChart(focusOnSeries?: LabeledSeries[]) {
-    // Transform the data into a format that chart.js can render it.
-    const data = [];
-    for (const series of this.data.series) {
-      let lineWidth: number = GraphComponent.THIN_LINE;
-      if (focusOnSeries !== undefined && focusOnSeries.includes(series)) {
-        lineWidth = GraphComponent.THICK_LINE;
+  boldDates() {
+    if (this.chart) {
+      const self = this;
+      d3.select('#' + this.chartDivId)
+          .selectAll('.c3-axis-x')
+          .selectAll('.tick text')
+          .each(function() {
+            // We get x (the x position), dy (how much to shift vertically), and
+            // dx (how much to shift horiztontally) of the tspan inside text
+            const dy = d3.select(this).select('tspan').attr('dy');
+            const dx = d3.select(this).select('tspan').attr('dx');
+            const x = d3.select(this).select('tspan').attr('x');
+            const textSplit = d3.select(this).text().split(' ');
+            const text = d3.select(this).text();
+            const tspan = d3.select(this)
+                              .text(null)
+                              .append('tspan')
+                              .attr('x', x)
+                              .attr('dx', dx)
+                              .attr('dy', dy)
+                              .style('font-weight', 'bolder');
+            // Only add the tick label text if it was meant to be
+            // displayed.
+            if (self.labels.length > 0 && self.labels.includes(text)) {
+              tspan.text(
+                  textSplit[0]);  // Set the 'bold' tspan's content as the date.
+              d3.select(this).append('tspan').text(
+                  ' ' + textSplit[1]);  // Add an additional tspan for the time.
+            }
+          });
+    }
+  }
+
+  fixOpacity() {
+    d3.select('#' + this.chartDivId).selectAll('.c3-circle').each(function(d) {
+      if (d3.select(this).style('opacity') === '0.5') {
+        d3.select(this).style('opacity', 1);
       }
-      data.push({
-        data: series.coordinates.map(pt => {
-          return {x: pt[0].toISO(), y: pt[1]};
-        }),
-        label: series.label,
-        // Do not fill the area under the line.
-        fill: false,
-        borderWidth: lineWidth
-      });
-      this.chartColors.push({
-        backgroundColor: series.legendInfo.fill,
-        borderColor: series.legendInfo.fill,
-      });
-    }
-
-    // The subclasses may have already put series in lineChartData, and we don't
-    // want to remove them, so we just append them to the series. On the other
-    // hand, if there's a blank series in lineChartData, we want to get rid of
-    // it before putting everything else in.
-    if (data.length > 0 && this.onlyDefaultDataPresent()) {
-      this.chartData = data;
-    } else {
-      this.chartData = this.chartData.concat(data);
-    }
-
-    // Set the axis label if it's provided.
-    this.chartOptions.scales.yAxes[0].scaleLabel.labelString =
-        this.axisLabel ? this.axisLabel : '';
-
-    // Add left-padding so that the y-axes are aligned with one another.
-    this.chartOptions.scales.yAxes[0]['afterSetDimensions'] = function(axes) {
-      axes.paddingLeft = GraphComponent.Y_AXIS_LEFT_PADDING;
-    };
-
-    this.showXRegions();
-  }
-
-  private showXRegions() {
-    for (const region of this.xRegions) {
-      const annotation = {
-        // Show the region underneath the data points.
-        drawTime: 'beforeDatasetsDraw',
-        type: 'box',
-        xMin: region[0].toMillis(),
-        xMax: region[1].toMillis(),
-        xScaleID: GraphComponent.X_AXIS_ID,
-        yScaleID: GraphComponent.Y_AXIS_ID,
-        backgroundColor: 'rgba(179, 157, 219, 0.3)',  // purple secondary color
-        borderColor: 'rgba(179, 157, 219, 0.9)',      // purple secondary color
-        borderWidth: 2,
-      };
-      this.chartOptions.annotation.annotations.push(annotation);
-    }
-  }
-
-  protected onlyDefaultDataPresent() {
-    return this.chartData.length === 1 &&
-        this.chartData[0].label === GraphComponent.DEFAULT_BLANK_DATA_LABEL;
-  }
-
-  /***************************
-   * Legend interactions
-   */
-
-  resetChart() {
-    this.generateChart();
-  }
-
-  focusOnSeries(labeledSeries: LabeledSeries[]) {
-    this.generateChart(labeledSeries);
-  }
-
-  /******************************
-   * Helper functions for tooltipping
-   */
-
-  /**
-   * Finds or creates a HTML element to render the tooltip onto.
-   * @param canvas The Canvas this graph is rendered on
-   */
-  private findOrCreateTooltipElement(canvas: HTMLElement): HTMLElement {
-    const tooltipTag = 'chartjs-tooltip' + this.chartDivId;
-    let tooltipEl = document.getElementById(tooltipTag);
-    if (!tooltipEl) {
-      tooltipEl = document.createElement('div');
-      tooltipEl.id = tooltipTag;
-      tooltipEl.classList.add('chartjs-tooltip');
-      tooltipEl.innerHTML = '<table></table>';
-      canvas.parentNode.appendChild(tooltipEl);
-    }
-    return tooltipEl;
+    });
   }
 
   /**
-   * Gets the tooltip text for the given context.
-   * @param tooltipContext The tooltip context passed into the tooltip callback
+   * Generates the chart specified by the extending class.
+   * @param containedGraph The graph component to be rendered.
+   * @param chartHeight The height of the chart in pixels.
+   * @returns a ChartConfiguration. See typing definition here:
+   * https://github.com/DefinitelyTyped/DefinitelyTyped/blob/master/types/c3/index.d.ts
    */
-  private getTooltipInnerHtml(tooltipContext: any): string {
-    // We squish together all points at the same timestamp preemptively in
-    // our tooltip creation so that we just find the index of the
-    // tooltip based on the first point's x-value.
-    const xValue = tooltipContext.dataPoints[0].label;
-
-    const timestampKey = DateTime.fromISO(xValue).toMillis().toString();
-    // Our data class may provide a tooltip key function that will
-    // get the correct identifier from the data point. If it does,
-    // we'll use that, but by default, the key is the timestamp
-    // of the data point.
-    const keyToUse = this.data.tooltipKeyFn ?
-        this.data.tooltipKeyFn(tooltipContext) :
-        timestampKey;
-
-    // If something bad happens and we don't have a tooltip for the
-    // key, return a generic tooltip with the value.
-    let tooltipText;
-    if (!this.data.tooltipMap || !this.data.tooltipMap.has(keyToUse)) {
-      tooltipText =
-          new StandardTooltip(
-              [], undefined,
-              this.data instanceof LineGraphData ? this.data.unit : '')
-              .getTooltip(undefined, this.sanitizer);
-    } else {
-      tooltipText = this.data.tooltipMap.get(keyToUse);
-    }
-    return tooltipText;
-  }
+  abstract generateChart(chartHeight?: number): c3.ChartConfiguration;
 }

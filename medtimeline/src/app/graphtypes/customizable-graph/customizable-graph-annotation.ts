@@ -6,7 +6,6 @@
 import * as Color from 'color';
 import * as d3 from 'd3';
 import {DateTime} from 'luxon';
-import {RenderedCustomizableChart} from '../graph/renderedcustomizablechart';
 
 /*
  * This class makes an annotation for a particular timestamp with custom notes.
@@ -16,7 +15,7 @@ export class CustomizableGraphAnnotation {
   // the annotation will show.
   private showDetails: boolean;
   // The default y-coordinate for the annotation.
-  readonly defaultYCoordinate = 60;
+  readonly defaultYCoordinate = 45;
   // The maximum horizontal overlap for any two annotations.
   readonly horizontalOverlap = 20;
   // The maximum vertical overlap for any two annotations.
@@ -30,7 +29,7 @@ export class CustomizableGraphAnnotation {
 
   timestamp: DateTime;
 
-  private readonly yAxisXCoord = 125;
+  private readonly yAxisXCoord = 90;
 
   constructor(
       timestamp: DateTime,
@@ -45,17 +44,19 @@ export class CustomizableGraphAnnotation {
     this.timestamp = timestamp;
   }
 
-  addAnnotation(renderedChart: RenderedCustomizableChart) {
+  addAnnotation(chart: any) {
     const self = this;
     this.showDetails = false;
 
     const millis = this.timestamp.toMillis();
+    const xCoordinate = chart.internal.x(millis) + '';
 
-    const tooltipInfo = renderedChart.insertInitialTooltip(millis);
-    const tooltip = tooltipInfo[0];
-    const xCoordinate = tooltipInfo[1];
+    // Find the points for where to draw the new annotation & connector,
+    // which are on different scales.
     const yCoordinate = this.findBestYCoordinates(xCoordinate);
-
+    const tooltip = chart.internal.selectChart.style('position', 'relative')
+                        .append('div')
+                        .attr('class', 'tooltip-whole-' + millis);
     const tooltipContainer =
         tooltip.append('div').attr('class', 'tooltip-custom-' + millis);
     const tooltipTitleContainer = tooltipContainer.append('div');
