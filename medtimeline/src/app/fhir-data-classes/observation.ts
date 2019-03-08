@@ -9,8 +9,6 @@ import {BCHMicrobioCode} from '../clinicalconcepts/bch-microbio-code';
 import {LOINCCode} from '../clinicalconcepts/loinc-code';
 import {ResourceCode} from '../clinicalconcepts/resource-code-group';
 import {LabeledClass} from '../fhir-resource-set';
-import {fixUnitAbbreviations} from '../unit_utils';
-
 import {OBSERVATION_INTERPRETATION_VALUESET_URL, ObservationInterpretation} from './observation-interpretation-valueset';
 
 
@@ -171,7 +169,7 @@ export class Observation extends LabeledClass {
 
     this.value = json.valueQuantity ? json.valueQuantity : null;
     if (this.value) {
-      this.unit = fixUnitAbbreviations(this.value.unit);
+      this.unit = this.value.unit;
     }
 
     // We must calculate precision before the value is stored as a number, where
@@ -187,8 +185,8 @@ export class Observation extends LabeledClass {
     // TODO(b/121318193): Impement better parsing of Observations with BCH Codes
     // (associated with Microbiology data). These Observations might not have
     // values or results.
-    if (this.value === null && this.result === null && !this.interpretation &&
-        this.innerComponents.length === 0) {
+    if (this.value === null && this.result === null &&
+        this.interpretation === null && this.innerComponents.length === 0) {
       throw Error(
           'An Observation must have a value, result, inner components, ' +
           'or an interpretation to be useful. JSON: ' + JSON.stringify(json));

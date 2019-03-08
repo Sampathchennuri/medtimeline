@@ -3,14 +3,12 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-import {Component, forwardRef, Input} from '@angular/core';
+import {Component, forwardRef} from '@angular/core';
 import {DomSanitizer} from '@angular/platform-browser';
-import {ChartPoint} from 'chart.js';
+import * as c3 from 'c3';
 import {LineGraphData} from 'src/app/graphdatatypes/linegraphdata';
-import {ABNORMAL} from 'src/app/theme/bch_colors';
 
-import {GraphComponent} from '../graph/graph.component';
-import {LegendInfo} from '../legend-info';
+import {GraphComponent, Y_AXIS_TICK_MAX} from '../graph/graph.component';
 
 @Component({
   selector: 'app-linegraph',
@@ -21,159 +19,109 @@ import {LegendInfo} from '../legend-info';
   ]
 })
 export class LineGraphComponent extends GraphComponent<LineGraphData> {
-  @Input() showTicks: boolean;
-
   constructor(readonly sanitizer: DomSanitizer) {
     super(sanitizer);
   }
+  /**
+   * @returns the c3.ChartConfiguration object to generate the c3 chart.
+   * @override
+   */
+  generateChart(): c3.ChartConfiguration {
+    // Give labels to each series and make a map of x-values to y-values.
+    let min;
+    let max;
+    if (this.data.yAxisDisplayBounds[0] > this.data.yAxisDisplayBounds[1]) {
+      // No min or max set due to no data.
+      min = 0;
+      max = 10;
+    } else {
+      min = this.data.yAxisDisplayBounds[0];
+      max = this.data.yAxisDisplayBounds[1];
+    }
 
-  prepareForChartConfiguration() {
-    if (this.data.yAxisDisplayBounds) {
-      // We only ever have one y-axis so it's safe to work only on the 0th
-      // subscript here.
-      // Calculate the data range and add a bit of padding at top and bottom
-      // (unless the bottom is zero or the top is 100--those might be
-      // percentages). This reasonably ensures that there's no cropping where
-      // the normal bound labels would get cut off.
-      const padding =
-          (this.data.yAxisDisplayBounds[1] - this.data.yAxisDisplayBounds[0]) *
-          0.25;
-      this.chartOptions.scales.yAxes[0].ticks.min =
-          Math.max(this.data.yAxisDisplayBounds[0] - padding, 0);
-      this.chartOptions.scales.yAxes[0].ticks.max =
-          this.data.yAxisDisplayBounds[1] === 100 ?
-          this.data.yAxisDisplayBounds[1] :
-          this.data.yAxisDisplayBounds[1] + padding;
-      this.chartOptions.scales.yAxes[0].afterBuildTicks = (scale) => {
-        if (this.data && this.data.yTicks) {
-          scale.ticks = this.data.yTicks;
+    const yAxisConfig: c3.YAxisConfiguration = {
+      min: min,
+      max: max,
+      padding: {top: 20, bottom: 20},
+      tick: {
+        count: 5,
+        format: d => {
+          // We add padding to our y-axis tick labels so that all y-axes of the
+          // charts rendered on the page can be aligned.
+          return (d)
+              .toLocaleString('en-us', {
+                minimumFractionDigits: this.data.precision,
+                maximumFractionDigits: this.data.precision
+              })
+              .trim()
+              .padStart(Y_AXIS_TICK_MAX, '\xa0');
         }
-      };
-    }
-  }
-
-  adjustGeneratedChartConfiguration() {
-    // We have to wait until after the data loads up into the graph to iterate
-    // over the points and adjust their coloring based on the normal range.
-    this.addYNormalRange();
-  }
-
-  /**
-   * Adds y normal ranges to the graph and colors points the designated
-   * "abnormal" color if they fall outside the normal range.
-   */
-  private addYNormalRange() {
-    // Only LineGraphData has y normal bounds.
-    if (!(this.data instanceof LineGraphData)) {
-      return;
-    }
-
-    // Color points that fall outside of their respective normal ranges.
-    for (let i = 0; i < this.data.series.length; i++) {
-      const chartjsSeries = this.chartData[i];
-      const labeledSeries = this.data.series[i];
-      this.colorAbnormalPoints(
-          chartjsSeries, labeledSeries.yNormalBounds, labeledSeries.legendInfo);
-    }
-
-    // If there's more than one series on this graph we don't mark a normal
-    // region because they might not be the same.
-    const yBounds = this.data.series.length === 1 ?
-        this.data.series[0].yNormalBounds :
-        undefined;
-    if (!yBounds) {
-      return;
-    }
-
-    this.addGreenRegion(yBounds);
-  }
-
-  /**
-   * Draws a green box spanning the entire x-axis and covering y axis normal
-   * range. Also puts descriptive labels at the top and bottom of the range.
-   * @param yNormalBounds The bounds of the y range considered normal.
-   */
-  private addGreenRegion(yNormalBounds: [number, number]) {
-    const normalRegionAnnotation = {
-      // Show the y-bounds underneath the graph points.
-      drawTime: 'beforeDatasetsDraw',
-      type: 'box',
-      yMin: yNormalBounds[0],
-      yMax: yNormalBounds[1],
-      // No x-axis bounds so it extends to cover the whole graph.
-      xScaleID: GraphComponent.X_AXIS_ID,
-      yScaleID: GraphComponent.Y_AXIS_ID,
-      // Color the region light green.
-      backgroundColor: 'rgba(64, 191, 128, 0.15)',
+      },
     };
 
-    // Draw label lines for the high and low bounds of the normal range.
-    const lines = [
-      ['High normal boundary: ', yNormalBounds[1], -8],
-      ['Low normal boundary: ', yNormalBounds[0], 8]
-    ];
+    let graph = this.generateBasicChart(yAxisConfig);
 
-    for (const line of lines) {
-      const lbl = line[0];
-      const val = line[1];
-      const yOffsetPx = line[2];
-      const bound = {
-        type: 'line',
-        mode: 'horizontal',
-        scaleID: GraphComponent.Y_AXIS_ID,
-        value: val,
-        borderColor: 'rgba(64, 191, 128, 1)',
-        borderWidth: 2,
-        label: {
-          enabled: true,
-          // Clear background color.
-          backgroundColor: 'rgba(0,0,0,0.0)',
-          // Black text for label.
-          fontColor: 'rgba(0, 0, 0, 0.8)',
-          content: lbl + val.toString() + ' ' + this.data.unit,
-          // Shift the text above or below the line, and to the right side of
-          // the axis.
-          position: 'right',
-          yAdjust: yOffsetPx
-        }
-      };
-
-      this.chartOptions.annotation.annotations.push(bound);
-    }
-    this.chartOptions.annotation.annotations.push(normalRegionAnnotation);
-  }
-
-  /**
-   * Colors the point the default series color if it's in the normal range,
-   * or the designated "abnormal" color if it's outside of the normal range.
-   *
-   * @param series The data series to color points for.
-   * @param yNormalBounds The bounds of what should be considered normal.
-   * @param seriesLegend The legend info for the series we're working with.
-   */
-  private colorAbnormalPoints(
-      series: any, yNormalBounds: [number, number], seriesLegend: LegendInfo) {
-    const pointBackgroundColors = new Array<string>();
-    const pointBorderColors = new Array<string>();
-
-    for (let pt of series.data) {
-      // pt could also be a number here, so we constrain it to when it's a
-      // ChartPoint. For some reason Typescript doesn't like it when we do a
-      // test to see if pt is an instanceof ChartPoint so checking for the
-      // y-attribute is a workaround.
-      if (pt.hasOwnProperty('y')) {
-        pt = pt as ChartPoint;
-        if (yNormalBounds &&
-            (pt.y < yNormalBounds[0] || pt.y > yNormalBounds[1])) {
-          pointBackgroundColors.push(seriesLegend.fill.rgb().string());
-          pointBorderColors.push(ABNORMAL.rgb().string());
-        } else {
-          pointBackgroundColors.push(seriesLegend.fill.rgb().string());
-          pointBorderColors.push(seriesLegend.outline.rgb().string());
-        }
-        series.pointBackgroundColor = pointBackgroundColors;
-        series.pointBorderColor = pointBorderColors;
+    // Some things are only valid if there are y-axis normal bounds. We
+    // also only show normal bounds if there's one data series on the
+    // axis.
+    // These customizations are based on this.data, which is a type specific for
+    // LineGraphData, and could not be generalized in the abstract GraphCard
+    // class.
+    if (this.data.series.length > 0) {
+      const yBounds = this.data.series[0].yNormalBounds;
+      if (this.data.series.length === 1 && yBounds) {
+        graph = this.addYRegionOnChart(graph, yBounds);
       }
     }
+
+    // Check if there are any data points in the time range.
+    this.noDataPointsInDateRange =
+        !GraphComponent.dataPointsInRange(this.data.series, this.dateRange);
+
+    const self = this;
+    // If tick values aren't set, calculate the values.
+    if (!graph.axis.y.tick.values) {
+      graph.axis.y.tick.values = this.findYAxisValues(
+          this.data.yAxisDisplayBounds[0], this.data.yAxisDisplayBounds[1]);
+    }
+
+    if (graph.axis.y.tick.values.length === 0) {
+      // The dataset is empty. We show padded tick marks to align the y axis
+      // with the rest of the charts' axes.
+      for (let i = 0; i < 5; i++) {
+        graph.axis.y.tick.values.push(i);
+      }
+    }
+    const yValues = graph.axis.y.tick.values;
+    const needToWrap =
+        yValues.some(value => value.toString().length > Y_AXIS_TICK_MAX);
+    // Replace the tick label's initially displayed values to padded strings so
+    // that the axis is aligned.
+    if (needToWrap) {
+      graph.axis.y.tick.format = function(d) {
+        return ''.trim().padStart(Y_AXIS_TICK_MAX, '\xa0');
+      };
+      this.yAxisTickDisplayValues =
+          yValues.map(value => value.toLocaleString('en-us', {
+            minimumFractionDigits: this.data.precision,
+            maximumFractionDigits: this.data.precision
+          }));
+    }
+
+    // Ensure that a line is not drawn through points with "null" values.
+    graph.line = {connectNull: false};
+    return graph;
+  }
+
+  // Manually find y axis tick values based on the min and max display bounds.
+  private findYAxisValues(min: number, max: number): number[] {
+    // Evenly space out 5 numbers between the min and max (display bounds).
+    const difference = max - min;
+    const spacing = difference / 4;
+    const values = [];
+    for (let curr = min; curr <= max; curr += spacing) {
+      values.push(curr);
+    }
+    return values;
   }
 }
