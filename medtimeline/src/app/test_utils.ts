@@ -60,7 +60,7 @@ export class StubFhirService extends FhirService {
 
 export function makeSampleObservationJson(
     value: number, timestamp: DateTime,
-    referenceRange: [number, number] = [10, 20], interpretation = 'N'): any {
+    referenceRange: [number, number] = [10, 20]): any {
   return {
     code: {
       coding: [{system: 'http://loinc.org', code: '718-7'}],
@@ -68,12 +68,7 @@ export function makeSampleObservationJson(
     },
     effectiveDateTime: timestamp.toISO(),
     valueQuantity: {value: value},
-    interpretation: {
-      coding: [{
-        code: interpretation,
-        system: 'http://hl7.org/fhir/ValueSet/observation-interpretation'
-      }]
-    },
+    interpretation: {text: 'NA'},
     referenceRange:
         [{low: {value: referenceRange[0]}, high: {value: referenceRange[1]}}]
   };
@@ -104,19 +99,14 @@ export function makeMedicationOrder(): MedicationOrder {
 }
 
 export function makeSampleDiscreteObservationJson(
-    result: string, timestamp: DateTime, interpretation = 'N'): any {
+    result: string, timestamp: DateTime): any {
   return {
     code: {
       coding: [{system: 'http://loinc.org', code: '4090-7'}],
-      text: 'Vanc pk'
+      text: 'Vanco Pk'
     },
     effectiveDateTime: timestamp.toISO(),
-    interpretation: {
-      coding: [{
-        code: interpretation,
-        system: 'http://hl7.org/fhir/ValueSet/observation-interpretation'
-      }]
-    },
+    interpretation: {text: 'NA'},
     valueCodeableConcept: {text: result}
   };
 }

@@ -5,7 +5,6 @@
 
 import {async, ComponentFixture, TestBed} from '@angular/core/testing';
 import {DomSanitizer} from '@angular/platform-browser';
-import {ChartsModule} from 'ng2-charts';
 
 import {MicrobioGraphComponent} from './microbio-graph.component';
 
@@ -15,11 +14,8 @@ describe('MicrobioGraphComponent', () => {
 
   beforeEach(async(() => {
     TestBed
-        .configureTestingModule({
-          declarations: [MicrobioGraphComponent],
-          imports: [ChartsModule],
-          providers: [DomSanitizer]
-        })
+        .configureTestingModule(
+            {declarations: [MicrobioGraphComponent], providers: [DomSanitizer]})
         .compileComponents();
   }));
 
