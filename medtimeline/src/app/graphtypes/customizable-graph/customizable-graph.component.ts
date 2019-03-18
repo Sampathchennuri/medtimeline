@@ -3,17 +3,18 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file or at
 // https://developers.google.com/open-source/licenses/bsd
-import {Component, EventEmitter, forwardRef, Input, OnDestroy, Output} from '@angular/core';
+import {Component, EventEmitter, forwardRef, Input, OnChanges, OnDestroy, Output} from '@angular/core';
 import {MatDialog} from '@angular/material';
 import {DomSanitizer} from '@angular/platform-browser';
 import * as c3 from 'c3';
 import * as d3 from 'd3';
-import {DateTime} from 'luxon';
+import {DateTime, Interval} from 'luxon';
 // tslint:disable-next-line:max-line-length
 import {CustomizableTimelineDialogComponent} from 'src/app/cardtypes/customizable-timeline/customizable-timeline-dialog/customizable-timeline-dialog.component';
 import {CustomizableData} from 'src/app/graphdatatypes/customizabledata';
 
 import {GraphComponent} from '../graph/graph.component';
+
 import {CustomizableGraphAnnotation} from './customizable-graph-annotation';
 
 @Component({
@@ -28,7 +29,7 @@ import {CustomizableGraphAnnotation} from './customizable-graph-annotation';
   }]
 })
 export class CustomizableGraphComponent extends
-    GraphComponent<CustomizableData> implements OnDestroy {
+    GraphComponent<CustomizableData> implements OnChanges, OnDestroy {
   // An event indicating that the points on the CustomizableGraph have changed.
   @Output() pointsChanged = new EventEmitter<CustomizableData>();
   @Input() inEditMode: boolean;
@@ -37,7 +38,7 @@ export class CustomizableGraphComponent extends
   // The width and height of the dialog box that appears when the user clicks on
   // the chart.
   readonly dialogWidth = '450px';
-  readonly dialogHeight = '350px';
+  readonly dialogHeight = '375px';
 
   // The reference for the Dialog opened.
   private dialogRef: any;
@@ -53,8 +54,12 @@ export class CustomizableGraphComponent extends
     }
   }
 
-  regenerateChart() {
-    super.regenerateChart();
+  ngOnChanges() {
+    this.generateFromScratch();
+  }
+
+  generateFromScratch() {
+    super.generateFromScratch();
     const self = this;
     const chart: any =
         this.chart;  // We need the "any" declaration in order to access the
@@ -93,7 +98,7 @@ export class CustomizableGraphComponent extends
       if (self.inEditMode && !self.hoveringOverPoint) {
         const coordinates = d3.mouse(this);
         const parentCoordinates = d3.mouse(document.body);
-        self.allowAddingPoints(coordinates, parentCoordinates);
+        self.addPoint(coordinates, parentCoordinates);
       }
     });
     // Send the chart to the back, allowing points to be displayed on top of the
@@ -109,14 +114,35 @@ export class CustomizableGraphComponent extends
     // & aligned with other charts.
     d3.select(chart.element).select('.c3-axis-y').style('visibility', 'hidden');
 
+    // Once the chart is rendered, only display the data points in the current
+    // date range. This is due to a C3 bug that plots some points
+    // outside of the x-axis/y-axis boundaries upon loading additional data.
+    this.loadNewData();
     // Update the annotations displayed for this chart.
     this.updateAnnotations();
   }
 
   // This function loads the data into the chart without needing the chart to be
-  // re-rendered completely.
+  // re-rendered completely. We only load data that is strictly within the date
+  // range being displayed on the chart, due to a C3 bug that plots some points
+  // outside of the x-axis/y-axis boundaries.
   private loadNewData() {
-    this.chart.load({columns: this.data.c3DisplayConfiguration.allColumns});
+    const columnsToLoad: any = [['x_'], ['']];
+    const entireInterval = Interval.fromDateTimes(
+        this.dateRange.start.toLocal().startOf('day'),
+        this.dateRange.end.toLocal().endOf('day'));
+    for (let i = 1; i < this.data.c3DisplayConfiguration.allColumns[0].length;
+         i++) {
+      // Only add the data to the array being loaded if it is within the date
+      // range.
+      if (entireInterval.contains(
+              this.data.c3DisplayConfiguration.allColumns[0][i])) {
+        columnsToLoad[0].push(
+            this.data.c3DisplayConfiguration.allColumns[0][i]);
+        columnsToLoad[1].push(0);
+      }
+    }
+    this.chart.load({columns: columnsToLoad});
   }
 
   // If the selected date already has an annotation, modify the time
@@ -152,10 +178,14 @@ export class CustomizableGraphComponent extends
             timestamp.toLocal().toLocaleString(DateTime.TIME_24_SIMPLE));
   }
 
-  // Allow for the addition of a point to the CustomizableGraph, via a
-  // CustomizableTimelineDialog
-  private allowAddingPoints(
-      clickCoordinates: [number, number], parentCoordinates: [number, number]) {
+  /**
+   * Allow for the addition of a point to the CustomizableGraph, via a
+   * CustomizableTimelineDialog.
+   * (Visible only for testing.)
+   */
+  addPoint(clickCoordinates: [number, number], parentCoordinates: [
+    number, number
+  ]) {
     const dialogCoordinates = this.findDialogCoordinates(
         parentCoordinates[0] + 10, parentCoordinates[1] + 10);
     this.dialogRef = this.openDialog(clickCoordinates, dialogCoordinates);
@@ -171,9 +201,14 @@ export class CustomizableGraphComponent extends
       title: editedAnnotation.title,
       date: new Date(editedAnnotation.timestamp.toMillis()),
       description: editedAnnotation.description,
-      color: editedAnnotation.color
+      color: editedAnnotation.color,
+      dateRange: this.dateRange,
     } :
-                                    {date: xCoordinate};
+                                    {
+                                      date: xCoordinate,
+                                      dateRange: this.dateRange,
+                                    };
+
     this.dialogRef = this.dialog.open(CustomizableTimelineDialogComponent, {
       width: this.dialogWidth,
       height: this.dialogHeight,
@@ -187,7 +222,7 @@ export class CustomizableGraphComponent extends
           this.data.removePointFromSeries(
               DateTime.fromMillis(editedAnnotation.timestamp.toMillis()));
           this.removeAnnotation(editedAnnotation.timestamp.toMillis());
-          this.regenerateChart();
+          this.generateFromScratch();
         }
 
         const result: CustomizableGraphAnnotation =
@@ -201,12 +236,19 @@ export class CustomizableGraphComponent extends
             DateTime.fromMillis(this.updateTime(userSelectedDate.toMillis()));
         result.timestamp = userSelectedDate;
         this.data.addPointToSeries(0, result);
-        this.data.annotations.get(userSelectedDate.toMillis())
-            .addAnnotation(chart);
+        // Only display the annotation if the user selected date is within the
+        // current date range.
+        const entireInterval = Interval.fromDateTimes(
+            this.dateRange.start.toLocal().startOf('day'),
+            this.dateRange.end.toLocal().endOf('day'));
+        if (entireInterval.contains(userSelectedDate)) {
+          this.data.annotations.get(userSelectedDate.toMillis())
+              .addAnnotation(chart);
+          // Add listeners for click events on the new annotation.
+          this.addDeleteEvent(userSelectedDate.toMillis());
+          this.addEditListener(userSelectedDate.toMillis());
+        }
         this.loadNewData();
-        // Add listeners for click events on the new annotation.
-        this.addDeleteEvent(userSelectedDate.toMillis());
-        this.addEditEvent(userSelectedDate.toMillis());
         this.pointsChanged.emit(this.data);
       }
     });
@@ -223,18 +265,20 @@ export class CustomizableGraphComponent extends
                               .select('.c3-circles')
                               .selectAll('circle')
                               .nodes();
+    const entireInterval = Interval.fromDateTimes(
+        this.dateRange.start.toLocal().startOf('day'),
+        this.dateRange.end.toLocal().endOf('day'));
     if (chartedPoints.length > 0) {
       for (let i = 0; i < timestamps.length; i++) {
         const timestamp = timestamps[i];
         const xPosition = d3.select(chartedPoints[i]).attr('cx');
         // Only add the annotation if the chart point is displayed given the
-        // date range selected, and its x-position is greater than 0 (where the
-        // y-axis is).
-        if (Number(xPosition) >= 0) {
+        // date range selected.
+        if (entireInterval.contains(DateTime.fromMillis(timestamp))) {
           this.data.annotations.get(timestamp).addAnnotation(this.chart);
           // Add listeners for click events on the new annotation.
           this.addDeleteEvent(timestamp);
-          this.addEditEvent(timestamp);
+          this.addEditListener(timestamp);
         }
       }
     }
@@ -266,7 +310,7 @@ export class CustomizableGraphComponent extends
     deleteIcon.on('click', function() {
       const time = DateTime.fromMillis(millis);
       self.data.removePointFromSeries(time);
-      self.regenerateChart();
+      self.generateFromScratch();
       self.pointsChanged.emit(self.data);
     });
   }
@@ -274,11 +318,10 @@ export class CustomizableGraphComponent extends
   /**
    * Add a listener for a click event on the edit button of the annotation at
    * the given time.
+   * Visible only for testing.
    * @param millis The millis for this point to remove.
-   * @param xCoord The x-coordinate of where to show the dialog box.
-   * @param yCoord The y-coordinate of where to show the dialog box.
    */
-  private addEditEvent(millis: number) {
+  addEditListener(millis: number) {
     const self = this;
     const editIcon = d3.select('#' + this.chartDivId).select('#edit-' + millis);
     const currAnnotation = this.data.annotations.get(millis);
@@ -319,8 +362,42 @@ export class CustomizableGraphComponent extends
    * @override
    */
   generateChart(): c3.ChartConfiguration {
+    this.adjustYAxisConfig();
+    this.generateBasicChart();
+
+    this.chartConfiguration.axis.x.height = 50;
+    this.chartConfiguration.data.type = 'scatter';
+    this.chartConfiguration.zoom = {enabled: false};
+    const self = this;
+    this.chartConfiguration.data.onmouseover = function(d) {
+      self.hoveringOverPoint = true;
+    };
+    this.chartConfiguration.tooltip = {show: false};
+    this.chartConfiguration.transition = {duration: 0};
+    this.chartConfiguration.data.onmouseout = function(d) {
+      // Add a timeout to ensure that the user can't add a point immediately
+      // after moving away from an existing point.
+      setTimeout(() => {
+        self.hoveringOverPoint = false;
+      }, 500);
+    };
+    this.chartConfiguration.data.onclick = function(d, element) {
+      self.hoveringOverPoint = true;
+    };
+
+    this.chartConfiguration.data.color = function(color, d) {
+      return self.data.annotations.get(DateTime.fromJSDate(d.x).toMillis())
+          .color;
+    };
+    this.chartConfiguration
+        .point = {show: true, r: 5, focus: {expand: {enabled: false}}};
+    return this.chartConfiguration;
+  }
+
+
+  adjustYAxisConfig() {
     // Give labels to each series and make a map of x-values to y-values.
-    const yAxisConfig: c3.YAxisConfiguration = {
+    this.yAxisConfig = {
       min: 0,
       max: 5,
       padding: {top: 0, bottom: 0},
@@ -337,34 +414,9 @@ export class CustomizableGraphComponent extends
         }
       }
     };
-
-    const graph = this.generateBasicChart(yAxisConfig);
-
-    graph.axis.x.height = 50;
-    graph.data.type = 'scatter';
-    graph.zoom = {enabled: false};
-    const self = this;
-    graph.data.onmouseover = function(d) {
-      self.hoveringOverPoint = true;
-    };
-    graph.tooltip = {show: false};
-    graph.transition = {duration: 0};
-    graph.data.onmouseout = function(d) {
-      // Add a timeout to ensure that the user can't add a point immediately
-      // after moving away from an existing point.
-      setTimeout(() => {
-        self.hoveringOverPoint = false;
-      }, 500);
-    };
-    graph.data.onclick = function(d, element) {
-      self.hoveringOverPoint = true;
-    };
-
-    graph.data.color = function(color, d) {
-      return self.data.annotations.get(DateTime.fromJSDate(d.x).toMillis())
-          .color;
-    };
-    graph.point = {show: true, r: 5, focus: {expand: {enabled: false}}};
-    return graph;
   }
+
+  // This is not relevant for the CustomizableGraph, so its implementation for
+  // this class is empty.
+  adjustDataDependent() {}
 }
