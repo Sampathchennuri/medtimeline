@@ -58,14 +58,16 @@ describe('LineGraphComponent', () => {
 
   it('graph x and y values are correctly passed through', () => {
     fixture.detectChanges();
-    const generatedChart = component.generateChart();
-    expect(generatedChart['data']['xs']['Hemoglobin']).toEqual('x_Hemoglobin');
-    expect(generatedChart['data']['columns'][0].map(x => x.toString()))
+    component.generateChart();
+    expect(component.chartConfiguration['data']['xs']['Hemoglobin'])
+        .toEqual('x_Hemoglobin');
+    expect(component.chartConfiguration['data']['columns'][0].map(
+               x => x.toString()))
         .toEqual([
           'x_Hemoglobin', DateTime.utc(1995, 7, 21).toISO(),
           DateTime.utc(1995, 7, 22).toISO()
         ]);
-    expect(generatedChart['data']['columns'][1]).toEqual([
+    expect(component.chartConfiguration['data']['columns'][1]).toEqual([
       'Hemoglobin', 15, 20
     ]);
   });
@@ -73,15 +75,15 @@ describe('LineGraphComponent', () => {
   it('region not plotted for normal values when there is more than one series',
      () => {
        fixture.detectChanges();
-       const generatedChart = component.generateChart();
-       expect(generatedChart['regions']).toBeUndefined();
+       component.generateChart();
+       expect(component.chartConfiguration['regions']).toBeUndefined();
      });
 
   it('should calculate y-axis tick values correctly', () => {
     fixture.detectChanges();
-    const generatedChart = component.generateChart();
-    expect(generatedChart.axis.y.tick.values.length).toEqual(5);
-    expect(generatedChart.axis.y.tick.values.toString())
+    component.generateChart();
+    expect(component.chartConfiguration.axis.y.tick.values.length).toEqual(5);
+    expect(component.chartConfiguration.axis.y.tick.values.toString())
         .toEqual('10,12.5,15,17.5,20');
   });
 
@@ -90,10 +92,10 @@ describe('LineGraphComponent', () => {
     component.data = LineGraphData.fromObservationSetList(
         'testgraph', new Array(obsSet), loincCodeGroup,
         TestBed.get(DomSanitizer), []);
-    const generatedChart = component.generateChart();
-    expect(generatedChart['regions'].length).toEqual(1);
-    expect(generatedChart['regions'][0]['axis']).toEqual('y');
-    expect(generatedChart['regions'][0]['start']).toEqual(10);
-    expect(generatedChart['regions'][0]['end']).toEqual(20);
+    component.generateChart();
+    expect(component.chartConfiguration['regions'].length).toEqual(1);
+    expect(component.chartConfiguration['regions'][0]['axis']).toEqual('y');
+    expect(component.chartConfiguration['regions'][0]['start']).toEqual(10);
+    expect(component.chartConfiguration['regions'][0]['end']).toEqual(20);
   });
 });
