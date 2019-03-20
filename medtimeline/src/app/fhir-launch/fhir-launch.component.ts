@@ -5,7 +5,6 @@
 
 import 'fhirclient';
 
-import {HttpClient} from '@angular/common/http';
 import {Component, OnInit} from '@angular/core';
 import {ActivatedRoute} from '@angular/router';
 import {Router} from '@angular/router';
@@ -40,9 +39,7 @@ export class FhirLaunchComponent implements OnInit {
   useDebugger: boolean;
   parameters = new Array<string>();
 
-  constructor(
-      private router: Router, private route: ActivatedRoute,
-      private http: HttpClient) {}
+  constructor(private router: Router, private route: ActivatedRoute) {}
 
   ngOnInit() {
     if (environment.useMockServer) {
