@@ -4,6 +4,8 @@
 // license that can be found in the LICENSE file.
 
 import 'fhirclient';
+
+import {HttpClient} from '@angular/common/http';
 import {Component, OnInit} from '@angular/core';
 import {ActivatedRoute} from '@angular/router';
 import {Router} from '@angular/router';
@@ -38,26 +40,37 @@ export class FhirLaunchComponent implements OnInit {
   useDebugger: boolean;
   parameters = new Array<string>();
 
-  constructor(private router: Router, private route: ActivatedRoute) {}
+  constructor(
+      private router: Router, private route: ActivatedRoute,
+      private http: HttpClient) {}
 
   ngOnInit() {
     if (environment.useMockServer) {
-      this.router.navigate(['']);
+      this.router.navigate(['setup']);
     } else {
       this.useDebugger = environment.useDebugger;
 
-      // If we're using the debugger, pause before authenticating and display
-      // all the credentials we're passing in.
-      if (this.useDebugger) {
-        this.clientId = FhirConfig.credentials.client_id;
-        this.baseURL = FhirConfig.url.baseURL;
-        this.redirectURL = FhirConfig.url.redirectURL;
-        this.route.queryParams.subscribe(params => {
-          this.parameters.push(JSON.stringify(params));
-        });
-      } else {
-        this.beginAuthenticationFlow();
-      }
+      this.route.queryParams.subscribe(params => {
+        const state = params['state'];
+        const code = params['code'];
+        if (state && code) {
+          // Navigate to the setup page, passing the code & state parameters
+          // along with the URL.
+          this.router.navigateByUrl('/setup?code=' + code + '&state=' + state);
+        } else {
+          if (this.useDebugger) {
+            this.clientId = FhirConfig.credentials.client_id;
+            this.baseURL = FhirConfig.url.baseURL;
+            this.redirectURL = FhirConfig.url.redirectURL;
+            this.route.queryParams.subscribe(params => {
+              this.parameters.push(JSON.stringify(params));
+            });
+            return;
+          }
+
+          this.beginAuthenticationFlow();
+        }
+      });
     }
   }
 
