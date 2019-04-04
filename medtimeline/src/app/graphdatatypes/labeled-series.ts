@@ -5,10 +5,12 @@
 
 import {DateTime, Interval} from 'luxon';
 
-import {DisplayGrouping} from '../clinicalconcepts/display-grouping';
-import {DiagnosticReport} from '../fhir-data-classes/diagnostic-report';
+import {negFinalMB, negPrelimMB, posFinalMB, posPrelimMB} from '../clinicalconcepts/display-grouping';
+import {DiagnosticReport, DiagnosticReportStatus} from '../fhir-data-classes/diagnostic-report';
 import {Encounter} from '../fhir-data-classes/encounter';
 import {MedicationAdministration} from '../fhir-data-classes/medication-administration';
+import {CHECK_RESULT_CODE} from '../fhir-data-classes/observation-interpretation-valueset';
+import {LegendInfo} from '../graphtypes/legend-info';
 
 import {MedicationOrder, MedicationOrderSet} from './../fhir-data-classes/medication-order';
 import {ObservationSet} from './../fhir-data-classes/observation-set';
@@ -20,28 +22,21 @@ import {ObservationSet} from './../fhir-data-classes/observation-set';
  * LabeledSeries may appear on the same graph.
  */
 export class LabeledSeries {
-  /** The descriptive label of the data series. */
-  readonly label: string;
-
-  /** The descriptive units of the data series. */
-  unit: string;
-
   /**
    * The x-values for this data series. This array should be parallel to the
    * yValues series, so that (xValues[n], yValues[n]) forms a coordinate.
    */
-  readonly xValues: DateTime[];
+  readonly xValues: DateTime[] = [];
   /**
    * The y-values for this data series. This array should be parallel to the
    *  xValues series, so that (xValues[n], yValues[n]) forms a coordinate.
    */
-  readonly yValues: number[];
+  readonly yValues: number[] = [];
 
   /**
-   * This tuple represents the low and high bounds of what should be
-   * considered "normal" along the y-axis.
+   * The y units for this series.
    */
-  readonly yNormalBounds: [number, number];
+  unit: string;
 
   /**
    * This is the desired display range for the y-axis for this series. We
@@ -50,18 +45,27 @@ export class LabeledSeries {
    */
   readonly yDisplayBounds: [number, number];
 
-  /**
-   * This is the concept group representing the data of this series.
-   */
-  readonly concept: DisplayGrouping;
-
   constructor(
-      lbl: string, coordinates: Array<[DateTime, number]>, unit?: string,
-      yNormalBounds?: [number, number], concept?: DisplayGrouping) {
-    this.label = lbl;
-    this.xValues = [];
-    this.yValues = [];
+      /** The descriptive label of the data series. */
+      readonly label: string,
+      /** The coordinate set for the series. */
+      coordinates: Array<[DateTime, number]>,
+      /** The y-axis unit for this series. */
+      unit?: string,
+      /**
+       * This tuple represents the low and high bounds of what should be
+       * considered "normal" along the y-axis.
+       */
+      readonly yNormalBounds?: [number, number],
+      /**
+       * Holds information about how this series should be displayed.
+       */
+      readonly legendInfo?: LegendInfo) {
     this.unit = unit;
+
+    // If a specific legend wasn't passed through then we generate one for the
+    // series.
+    this.legendInfo = legendInfo || new LegendInfo(label);
 
     /*
      * Separate out the coordinates into x and y values because that's what
@@ -71,8 +75,6 @@ export class LabeledSeries {
       this.xValues.push(x);
       this.yValues.push(y);
     }
-    this.yNormalBounds = yNormalBounds;
-    this.concept = concept;
 
     /**
      * Calculate the y axis display bounds by finding the outer boundaries of
@@ -199,6 +201,7 @@ export class LabeledSeries {
     const medAdminsForOrder = order.administrationsForOrder;
 
     const label = order.label + order.orderId;
+    const legend = order.rxNormCode.displayGrouping;
 
     if (medAdminsForOrder) {
       for (const annotatedAdmin of medAdminsForOrder.resourceList) {
@@ -253,9 +256,11 @@ export class LabeledSeries {
       new LabeledSeries(
           label, coordinates, medAdminsForOrder.unit,
           undefined,  // yNormalBounds
-          order.rxNormCode.displayGrouping),
+          legend),
       new LabeledSeries(
-          'endpoint' + label, endpointCoordinates, medAdminsForOrder.unit)
+          'endpoint' + label, endpointCoordinates, medAdminsForOrder.unit,
+          undefined,  // yNormalBounds
+          legend)
     ];
   }
 
@@ -295,14 +300,40 @@ export class LabeledSeries {
     }
     // Make a LabeledSeries for each interpretation.
     for (const interpretation of Array.from(interpretationMap.keys())) {
+      const seriesLabel =
+          report.id + '-' + interpretation + '-' + report.status;
+      const isPositive = seriesLabel.includes(CHECK_RESULT_CODE);
       series.push(new LabeledSeries(
           // Encode the status and interpretation into the series name so that
           // we can use d3 later on to filter the data points and display them
           // with the correct styling.
-          report.id + '-' + interpretation + '-' + report.status,
-          interpretationMap.get(interpretation)));
+          seriesLabel, interpretationMap.get(interpretation),
+          undefined,  // unit
+          undefined,  // yNormalBounds
+          LabeledSeries.getLegendInfoFromResult(report.status, isPositive)));
     }
     return series;
+  }
+
+  /**
+   * Returns the correct legend info for a diagnostic report.
+   * @param status The DiagnosticReport's status.
+   * @param isPositive Whether the report appears to be positive.
+   * @returns The correct legend info for the report.
+   */
+  private static getLegendInfoFromResult(
+      status: DiagnosticReportStatus, isPositive: boolean): LegendInfo {
+    if (isPositive) {
+      if (status === DiagnosticReportStatus.Preliminary) {
+        return posPrelimMB;
+      } else if (status === DiagnosticReportStatus.Final) {
+        return posFinalMB;
+      }
+    } else if (status === DiagnosticReportStatus.Preliminary) {
+      return negPrelimMB;
+    } else if (status === DiagnosticReportStatus.Final) {
+      return negFinalMB;
+    }
   }
 
   private static getYPositionForMed(
@@ -327,5 +358,14 @@ export class LabeledSeries {
       }
     }
     return coordinates;
+  }
+
+  hasPointInRange(dateRange: Interval) {
+    for (const x of this.xValues) {
+      if (dateRange.contains(x)) {
+        return true;
+      }
+    }
+    return false;
   }
 }

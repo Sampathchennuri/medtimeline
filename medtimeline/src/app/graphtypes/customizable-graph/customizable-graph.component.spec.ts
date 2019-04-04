@@ -4,11 +4,13 @@
 // license that can be found in the LICENSE file.
 
 import {async, ComponentFixture, TestBed} from '@angular/core/testing';
-import {MatDialog} from '@angular/material';
+import {MatDialog} from '@angular/material/dialog';
 import * as d3 from 'd3';
 import {DateTime, Interval} from 'luxon';
 import {of} from 'rxjs';
 import {CustomizableData} from 'src/app/graphdatatypes/customizabledata';
+
+import {DateTimeXAxis} from '../graph/datetimexaxis';
 
 import {CustomizableGraphAnnotation} from './customizable-graph-annotation';
 import {CustomizableGraphComponent} from './customizable-graph.component';
@@ -16,6 +18,7 @@ import {CustomizableGraphComponent} from './customizable-graph.component';
 describe('CustomizableGraphComponent', () => {
   let component: CustomizableGraphComponent;
   let fixture: ComponentFixture<CustomizableGraphComponent>;
+
 
   const annotationTime = DateTime.fromISO('2019-04-04T00:53:00');
 
@@ -49,25 +52,12 @@ describe('CustomizableGraphComponent', () => {
   beforeEach(() => {
     fixture = TestBed.createComponent(CustomizableGraphComponent);
     component = fixture.componentInstance;
+    component.xAxis = new DateTimeXAxis(Interval.fromDateTimes(
+        DateTime.utc().minus({days: 2}), DateTime.utc()));
+    component.data = CustomizableData.defaultEmptySeries();
     MatDialogRefStub.setTime(annotationTime);
     fixture.detectChanges();
   });
-
-  it('findDialogCoordinate should correctly calculate new dialog position if necessary',
-     () => {
-       const originalXPosition = window.innerWidth;
-       const originalYPosition = window.innerHeight;
-       expect(component.findDialogCoordinates(
-                  originalXPosition, originalYPosition)[0])
-           .toEqual(
-               window.innerWidth -
-               Number(component.dialogWidth.replace('px', '')));
-       expect(component.findDialogCoordinates(
-                  originalXPosition, originalYPosition)[1])
-           .toEqual(
-               window.innerHeight -
-               Number(component.dialogHeight.replace('px', '')));
-     });
 
   /**
    * Adding, editing, and deleting points are also well-covered in end to end
@@ -78,9 +68,9 @@ describe('CustomizableGraphComponent', () => {
   it('should handle adding points', () => {
     // Set up some stub data so that there's a chart to render.
     component.data = CustomizableData.defaultEmptySeries();
-    component.dateRange =
-        Interval.fromDateTimes(DateTime.utc().minus({days: 2}), DateTime.utc());
-    component.generateFromScratch();
+    component.xAxis = new DateTimeXAxis(Interval.fromDateTimes(
+        DateTime.utc().minus({days: 2}), DateTime.utc()));
+    component.generateBasicChart();
 
     // Add a point to the graph. The stubs will populate it with a default
     // date and time.
@@ -99,9 +89,9 @@ describe('CustomizableGraphComponent', () => {
   it('should handle editing a point', () => {
     // Set up some stub data so that there's a chart to render.
     component.data = CustomizableData.defaultEmptySeries();
-    component.dateRange =
-        Interval.fromDateTimes(DateTime.utc().minus({days: 2}), DateTime.utc());
-    component.generateFromScratch();
+    component.xAxis = new DateTimeXAxis(Interval.fromDateTimes(
+        DateTime.utc().minus({days: 2}), DateTime.utc()));
+    component.generateChart();
 
     // Add a point to the graph. The stubs will populate it with a default
     // date and time.
@@ -129,9 +119,9 @@ describe('CustomizableGraphComponent', () => {
   it('should handle deleting a point', () => {
     // Set up some stub data so that there's a chart to render.
     component.data = CustomizableData.defaultEmptySeries();
-    component.dateRange =
-        Interval.fromDateTimes(DateTime.utc().minus({days: 2}), DateTime.utc());
-    component.generateFromScratch();
+    component.xAxis = new DateTimeXAxis(Interval.fromDateTimes(
+        DateTime.utc().minus({days: 2}), DateTime.utc()));
+    component.generateChart();
 
     // Add a point to the graph. The stubs will populate it with a default
     // date and time.
