@@ -5,12 +5,21 @@
 
 import {async, ComponentFixture, TestBed} from '@angular/core/testing';
 import {FormsModule, ReactiveFormsModule} from '@angular/forms';
-// tslint:disable-next-line:max-line-length
-import {MAT_DIALOG_DATA, MatAutocompleteModule, MatCheckboxModule, MatDatepickerModule, MatDialog, MatDividerModule, MatListModule, MatMenuModule, MatNativeDateModule, MatProgressSpinnerModule, MatSnackBar, MatSnackBarModule, MatToolbarModule} from '@angular/material';
+import {MatNativeDateModule, MatRadioModule} from '@angular/material';
+import {MatAutocompleteModule} from '@angular/material/autocomplete';
 import {MatCardModule} from '@angular/material/card';
+import {MatCheckboxModule} from '@angular/material/checkbox';
+import {MatDatepickerModule} from '@angular/material/datepicker';
+import {MAT_DIALOG_DATA, MatDialog} from '@angular/material/dialog';
+import {MatDividerModule} from '@angular/material/divider';
 import {MatIconModule} from '@angular/material/icon';
 import {MatInputModule} from '@angular/material/input';
-import {By} from '@angular/platform-browser';
+import {MatListModule} from '@angular/material/list';
+import {MatMenuModule} from '@angular/material/menu';
+import {MatProgressSpinnerModule} from '@angular/material/progress-spinner';
+import {MatSnackBar, MatSnackBarModule} from '@angular/material/snack-bar';
+import {MatToolbarModule} from '@angular/material/toolbar';
+import {By, DomSanitizer} from '@angular/platform-browser';
 import {BrowserModule} from '@angular/platform-browser';
 import {BrowserAnimationsModule} from '@angular/platform-browser/animations';
 import {DateTime} from 'luxon';
@@ -42,7 +51,8 @@ import {TimelineToolbarComponent} from '../timeline-toolbar/timeline-toolbar.com
 
 import {CardcontainerComponent} from './cardcontainer.component';
 
-const resourceCodeManagerStub = new ResourceCodeManager(new StubFhirService());
+const resourceCodeManagerStub =
+    new ResourceCodeManager(new StubFhirService(), TestBed.get(DomSanitizer));
 
 describe('CardcontainerComponent', () => {
   let component: CardcontainerComponent;
@@ -108,7 +118,6 @@ describe('CardcontainerComponent', () => {
     timelineToolbar =
         fixture.debugElement.query(By.directive(TimelineToolbarComponent))
             .componentInstance;
-
     dialogRefSpyObj =
         jasmine.createSpyObj({open: of({}), afterClosed: of({}), close: null});
     dialogSpy =
@@ -122,8 +131,8 @@ describe('CardcontainerComponent', () => {
     fixture.detectChanges();
   });
 
-  it('should create', async(() => {
-       fixture.whenStable().then(x => expect(component).toBeTruthy());
+  it('should create', (() => {
+       expect(component).toBeTruthy();
      }));
 
   it('should listen for event to add card', () => {
@@ -155,47 +164,61 @@ describe('CardcontainerComponent', () => {
 
   it('should calculate eventlines correctly', () => {
     const dateTime = DateTime.fromISO('2012-08-04T11:00:00.000Z');
-    const eventlinesOriginalSize = component.eventlines.length;
     const initialData = CustomizableData.defaultEmptySeries();
     initialData.addPointToSeries(
-        0, new CustomizableGraphAnnotation(dateTime, 'title!'));
+        new CustomizableGraphAnnotation(dateTime, 'title!'));
     component.updateEventLines(
         {data: initialData, id: component.displayedConcepts[0].id});
-    expect(component.eventlines.length).toEqual(eventlinesOriginalSize + 1);
-    expect(component.eventlines).toEqual([
-      {class: 'color000000', text: 'title!', value: dateTime.toMillis()}
-    ]);
+    // There should be the original point needed to show the x-axis,
+    // plus the new point.
+    expect(component.eventlines.length).toEqual(2);
+    expect(component.eventlines[1])
+        .toEqual(
+            {class: 'color000000', text: 'title!', value: dateTime.toMillis()});
   });
 
   it('should calculate eventlines correctly with more than one custom timeline',
      () => {
        const initialData = CustomizableData.defaultEmptySeries();
+
        const dateTime1 = DateTime.fromISO('2012-08-04T11:00:00.000Z');
-       const dateTime2 = DateTime.fromISO('2012-08-20T11:00:00.000Z');
-       const eventlinesOriginalSize = component.eventlines.length;
        initialData.addPointToSeries(
-           0, new CustomizableGraphAnnotation(dateTime1, 'title!'));
+           new CustomizableGraphAnnotation(dateTime1, 'title!'));
        component.updateEventLines(
            {data: initialData, id: component.displayedConcepts[0].id});
-       expect(component.eventlines.length).toEqual(eventlinesOriginalSize + 1);
-       expect(component.eventlines).toEqual([
-         {class: 'color000000', text: 'title!', value: dateTime1.toMillis()}
-       ]);
+       // There should be the original point needed to show the x-axis,
+       // plus the new point.
+       expect(component.eventlines.length).toEqual(2);
+       // Drop the first point (which anchors the x-axis but isn't ever
+       // rendered) for comparison.
+       expect(component.eventlines).toContain({
+         class: 'color000000',
+         text: 'title!',
+         value: dateTime1.toMillis()
+       });
 
        component.displayedConcepts.push(
            {concept: 'customTimeline', id: 'uniqueID'});
        const data2 = CustomizableData.defaultEmptySeries();
+       const dateTime2 = DateTime.fromISO('2012-08-20T11:00:00.000Z');
        data2.addPointToSeries(
-           0, new CustomizableGraphAnnotation(dateTime2, 'another title!'));
+           new CustomizableGraphAnnotation(dateTime2, 'another title!'));
        component.updateEventLines({data: data2, id: 'uniqueID'});
-       expect(component.eventlines.length).toEqual(eventlinesOriginalSize + 2);
-       expect(component.eventlines).toEqual([
-         {class: 'color000000', text: 'title!', value: dateTime1.toMillis()}, {
-           class: 'color000000',
-           text: 'another title!',
-           value: dateTime2.toMillis()
-         }
-       ]);
+
+
+       expect(component.eventlines.length).toEqual(4);
+       // Drop the first point (which anchors the x-axis but isn't ever
+       // rendered) for comparison.
+       expect(component.eventlines).toContain({
+         class: 'color000000',
+         text: 'title!',
+         value: dateTime1.toMillis()
+       });
+       expect(component.eventlines).toContain({
+         class: 'color000000',
+         text: 'another title!',
+         value: dateTime2.toMillis()
+       });
      });
 
   /**
