@@ -12,10 +12,13 @@ import {v4 as uuid} from 'uuid';
 
 import {environment} from '../../environments/environment';
 import {CardComponent} from '../cardtypes/card/card.component';
-import {ResourceCodeManager, ResourceCodesForCard} from '../clinicalconcepts/resource-code-manager';
+import {ResourceCodeManager} from '../clinicalconcepts/resource-code-manager';
+import {ConfirmSaveComponent} from '../confirm-save/confirm-save.component';
 import {DeleteDialogComponent} from '../delete-dialog/delete-dialog.component';
 import {FhirService} from '../fhir.service';
 import {CustomizableData} from '../graphdatatypes/customizabledata';
+import {AxisGroup} from '../graphtypes/axis-group';
+import {DateTimeXAxis} from '../graphtypes/graph/datetimexaxis';
 import {ChartType} from '../graphtypes/graph/graph.component';
 import {SetupDataService} from '../setup-data.service';
 
@@ -32,13 +35,13 @@ export class CardcontainerComponent {
   // Whether or not to display the debugger.
   useDebugger = environment.useDebugger;
 
-  @ViewChildren(CardComponent) containedCards!: QueryList<CardComponent>;
-
-  // The format of each object in the array is an object representing a line
-  // drawn on the chart, that has a value, text, and class field. The value
-  // field represents the x-position of the line to be drawn, while the class
-  // represents the class name, and the text represents the text displayed near
-  // the line.
+  /**
+   * The format of each object in the array is an object representing a line
+   * drawn on the chart, that has a value, text, and class field. The value
+   * field represents the x-position of the line to be drawn, while the class
+   * represents the class name, and the text represents the text displayed near
+   * the line.
+   */
   eventlines: Array<{[key: string]: number | string}> = [];
 
   // The concepts that are actually being displayed on the page.
@@ -46,17 +49,24 @@ export class CardcontainerComponent {
   // clicking the trashcan icon.
 
   readonly displayedConcepts:
-      Array<{[key: string]: ResourceCodesForCard | string | CustomizableData}> =
-          [];
+      Array<{[key: string]: AxisGroup | string | CustomizableData}> = [];
 
   // The original concepts to duplicate, if necessary.
-  readonly originalConcepts: ResourceCodesForCard[];
+  readonly originalConcepts: AxisGroup[];
 
   // Hold an instance of this enum so that the HTML template can access it.
   readonly chartType = ChartType;
 
-  // The time interval displayed.
-  dateRange: Interval;
+  /**
+   * By default make the date range displayed the past seven days.
+   */
+  dateRange: Interval =
+      Interval.fromDateTimes(DateTime.utc().minus({days: 7}), DateTime.utc());
+
+  /**
+   * The x-axis configured for this date range.
+   */
+  xAxis: DateTimeXAxis;
 
   // Holds a subscription to the observable sequence of events emitted by the
   // Dragula Service.
@@ -64,12 +74,14 @@ export class CardcontainerComponent {
 
   // Holds the most recently removed card from the container, mapping the index
   // of the displayed card to the displayedConcept value.
-  private recentlyRemoved: [
-    number, {[key: string]: ResourceCodesForCard | string | CustomizableData}
-  ];
+  private recentlyRemoved:
+      [number, {[key: string]: AxisGroup | string | CustomizableData}];
 
-  // The reference for the Dialog opened.
+  // The reference for the Delete Card Dialog opened.
   private deleteDialogRef: MatDialogRef<DeleteDialogComponent>;
+
+  // The reference for the Save Snapshot Dialog opened.
+  private saveDialogRef: MatDialogRef<ConfirmSaveComponent>;
 
   // A map of custom timeline id to the event lines corresponding to that
   // timeline.
@@ -82,7 +94,8 @@ export class CardcontainerComponent {
       dragulaService: DragulaService, private fhirService: FhirService,
       resourceCodeManager: ResourceCodeManager, private snackBar: MatSnackBar,
       private deleteDialog: MatDialog,
-      private setupDataService: SetupDataService) {
+      private setupDataService: SetupDataService,
+      private saveDialog: MatDialog) {
     const displayGroups = resourceCodeManager.getDisplayGroupMapping();
     /* Load in the concepts to display, flattening them all into a
      * single-depth array. */
@@ -90,7 +103,7 @@ export class CardcontainerComponent {
                                 .reduce((acc, val) => acc.concat(val), []);
     this.setUpCards();
     this.setUpDrag(dragulaService);
-    console.warn(environment.useDebugger);
+    this.xAxis = new DateTimeXAxis(this.dateRange);
   }
 
   private setUpCards() {
@@ -165,13 +178,25 @@ export class CardcontainerComponent {
   // UI, and update the date range.
   changeDateRange($event) {
     this.dateRange = $event;
+    this.xAxis = new DateTimeXAxis(this.dateRange);
   }
 
   // Saves a snapshot of the graph drawer HTML to the EHR using a FhirService.
   snapshot() {
-    this.fhirService.saveStaticNote(
-        document.getElementsByClassName('cardContainer')[0].innerHTML,
-        DateTime.fromJSDate(new Date()).toISO());
+    const html = document.getElementsByClassName('cardContainer')[0].innerHTML;
+    this.saveDialogRef =
+        this.saveDialog.open(ConfirmSaveComponent, {data: html, height: '80%'});
+    this.saveDialogRef.afterClosed().subscribe(result => {
+      // Only save the snapshot to the EHR if the user confirmed the save.
+      if (result) {
+        const date = DateTime.fromJSDate(new Date()).toISO();
+        this.fhirService.saveStaticNote(html, date);
+        this.snackBar.open('Snapshot saved to PowerChart', 'Dismiss', {
+          duration: this.DISPLAY_TIME,  // Wait 6 seconds before dismissing the
+                                        // snack bar.
+        });
+      }
+    });
   }
 
   // Listen for an event indicating that a "delete" button has been clicked on a
@@ -208,8 +233,9 @@ export class CardcontainerComponent {
     // Undo the most recent deletion according to what is stored in
     // recentlyRemoved.
     snackBarRef.onAction().subscribe(() => {
-      this.displayedConcepts.splice(0, 0, this.recentlyRemoved[1]);
-      if (this.displayedConcepts[0].concept === 'customTimeline') {
+      const index = this.recentlyRemoved[0];
+      this.displayedConcepts.splice(index, 0, this.recentlyRemoved[1]);
+      if (this.displayedConcepts[index].concept === 'customTimeline') {
         this.updateEventLines({
           id: this.displayedConcepts[0].id,
           data: this.displayedConcepts[0].value
@@ -250,13 +276,8 @@ export class CardcontainerComponent {
   updateEventLines($event) {
     let times = [];
     if ($event.data) {
-      times = Array.from($event.data.annotations.keys())
-                  .map(x => Number(x))
-                  .sort((a, b) => a - b);
+      times = Array.from($event.data.annotations.keys()).map(x => Number(x));
     }
-    // Remove the first point (with the earliest possible date) that was added
-    // in order to display the x-axis.
-    times.shift();
     const eventlines = times.map(x => {
       return {
         value: x,
