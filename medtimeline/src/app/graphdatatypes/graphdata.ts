@@ -3,8 +3,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-import {DateTime} from 'luxon';
-import {DisplayGrouping} from '../clinicalconcepts/display-grouping';
+import {DateTime, Interval} from 'luxon';
 import {LabeledSeries} from './labeled-series';
 
 export class DisplayConfiguration {
@@ -20,14 +19,10 @@ export class DisplayConfiguration {
        * The keys of this map are the name of the y-series as stored in
        * allColumns, and the values are their corresponding x-series names.
        */
-      readonly columnMap: {},
-      /**
-       * Maps y-series names (keys) to DisplayGroupings.
-       */
-      readonly ySeriesLabelToDisplayGroup: Map<string, DisplayGrouping>) {}
+      readonly columnMap: {}) {}
 }
 
-/*
+/**
  * The base class for holding data pertaining to one graph.
  */
 export class GraphData {
@@ -45,13 +40,8 @@ export class GraphData {
 
   constructor(
       /** A list of the series to be displayed on the graph. */
-      readonly series: LabeledSeries[],
-      /**
-       * The DisplayGroups (for example, lab results, vital signs, medications)
-       * associated with particular series. We use this to make a custom legend
-       * for the graph.
-       */
-      seriesToDisplayGroup: Map<LabeledSeries, DisplayGrouping>,
+      readonly series: LabeledSeries[] = [],
+
       /**
        * A map to provide tooltips.
        * This is a bit complicated. c3's API lets you specify a function call
@@ -81,8 +71,7 @@ export class GraphData {
        * A list of x-axis regions to display on the graph.
        */
       regions?: any[]) {
-    this.c3DisplayConfiguration =
-        this.generateColumnMapping(seriesToDisplayGroup);
+    this.c3DisplayConfiguration = this.generateColumnMapping();
     this.xRegions = regions;
   }
 
@@ -91,20 +80,16 @@ export class GraphData {
    * chart.
    * @param data The GraphData to use while making the columns and column map.
    */
-  generateColumnMapping(seriesToDisplayGroup:
-                            Map<LabeledSeries, DisplayGrouping>):
-      DisplayConfiguration {
+  generateColumnMapping(): DisplayConfiguration {
     // Give labels to each series and make a map of x-values to y-values.
     const allColumns: any[][] = [];
     const columnMap = {};
-    const ySeriesLabelToDisplayGroup = new Map<string, DisplayGrouping>();
+
     for (const s of this.series) {
       allColumns.push(
           new Array<string|DateTime>('x_' + s.label).concat(s.xValues));
       allColumns.push(new Array<string|number>(s.label).concat(s.yValues));
       columnMap[s.label] = 'x_' + s.label;
-
-      ySeriesLabelToDisplayGroup.set(s.label, seriesToDisplayGroup.get(s));
     }
     // If there is no data, we add a "dummy" data point to still display the
     // x-axis.
@@ -117,7 +102,25 @@ export class GraphData {
           ['empty', 0]);
       columnMap['empty'] = 'x_empty';
     }
-    return new DisplayConfiguration(
-        allColumns, columnMap, ySeriesLabelToDisplayGroup);
+    return new DisplayConfiguration(allColumns, columnMap);
+  }
+
+  /*
+   * Returns whether or not there are any data points in the series that fall
+   * inside the date range provided.
+   * @param series The LabeledSeries to find data points in the date range.
+   * @param dateRange The date range in which to see if there are any data
+   *     points.
+   */
+  dataPointsInRange(dateRange: Interval): boolean {
+    const entireRange = Interval.fromDateTimes(
+        dateRange.start.toLocal().startOf('day'),
+        dateRange.end.toLocal().endOf('day'));
+    for (const s of this.series) {
+      if (s.hasPointInRange(entireRange)) {
+        return true;
+      }
+    }
+    return false;
   }
 }
