@@ -4,8 +4,8 @@
 // license that can be found in the LICENSE file.
 
 import {Component, Inject} from '@angular/core';
-import {FormControl} from '@angular/forms';
-import {MAT_DIALOG_DATA, MatDialogRef} from '@angular/material';
+import {FormControl, Validators} from '@angular/forms';
+import {MAT_DIALOG_DATA, MatDialogRef} from '@angular/material/dialog';
 import * as Color from 'color';
 import {DateTime, Interval} from 'luxon';
 // tslint:disable-next-line:max-line-length
@@ -13,17 +13,14 @@ import {CustomizableGraphAnnotation} from 'src/app/graphtypes/customizable-graph
 // tslint:disable-next-line:max-line-length
 import {BOSTON_BAY, BOSTON_GREEN, BOSTON_INDIGO, BOSTON_LAVENDER, BOSTON_PINK, BOSTON_PURPLE, BOSTON_YELLOW} from 'src/app/theme/bch_colors';
 
-@Component({
-  selector: 'app-customizable-timeline-dialog',
-  templateUrl: './customizable-timeline-dialog.component.html',
-  styleUrls: ['./customizable-timeline-dialog.component.css']
-})
-
 /**
  * A Dialog with a textarea input, used to set the description of points on the
  * CustomizableTimeline.
  */
-// TODO(b/121324544): Use existing libraries for the color and time picker.
+@Component({
+  selector: 'app-customizable-timeline-dialog',
+  templateUrl: './customizable-timeline-dialog.component.html',
+})
 export class CustomizableTimelineDialogComponent {
   // The text input for this dialog box.
   userTitle: string;
@@ -63,7 +60,10 @@ export class CustomizableTimelineDialogComponent {
     this.dateFormControl = new FormControl(this.date);
     const timeString = this.date.toLocaleTimeString(
         [], {hour12: false, hour: '2-digit', minute: '2-digit'});
-    this.timeFormControl = new FormControl(timeString);
+    // Since we do not have an input of type "time" due to IE restrictions, we
+    // manually check whether the input is a valid time string using regex.
+    this.timeFormControl = new FormControl(
+        timeString, Validators.pattern('([01]?[0-9]|2[0-3]):[0-5][0-9]'));
     this.generateListOfTimes();
     // Set the default selected color as yellow if unset, or find the BCH Color
     // matching the selected color passed in.
@@ -111,10 +111,7 @@ export class CustomizableTimelineDialogComponent {
     for (let time = 0; time <= 24 * 60; time += interval) {
       date.setHours(time / 60);
       date.setMinutes(time % 60);
-      // We need the time to be in 12-hour format for the display, but 24-hour
-      // format for the actual value passed into the input of type "time".
       this.listOfTimes.push({
-        12: date.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}),
         24: date.toLocaleTimeString(
             [], {hour12: false, hour: '2-digit', minute: '2-digit'})
       });
@@ -123,10 +120,13 @@ export class CustomizableTimelineDialogComponent {
 
   // Constructs a new Date based on user input.
   private getSelectedDate(): Date {
-    const dateString =
-        new Date(this.dateFormControl.value).toLocaleDateString();
-    const date = new Date(dateString + ' ' + this.timeFormControl.value);
-    return date;
+    const dateTime = new Date(this.dateFormControl.value);
+    // For date parsing to work in IE, we must remove all extraneous non-ASCII
+    // characters added, and manually change the time.
+    const time =
+        this.timeFormControl.value.replace(/[^\x00-x7F]/g, '').split(':');
+    dateTime.setHours(Number(time[0]), Number(time[1]));
+    return dateTime;
   }
 
   // Finds incomplete fields that are required and disables saving.
@@ -134,12 +134,13 @@ export class CustomizableTimelineDialogComponent {
     return !this.userTitle ||
         (this.userTitle && this.userTitle.trim().length === 0) ||
         this.dateFormControl.hasError('required') ||
-        this.timeFormControl.hasError('required');
+        this.timeFormControl.hasError('required') ||
+        this.timeFormControl.invalid || this.dateFormControl.invalid;
   }
 
   // Returns whether the date selected by the user falls outside the current
   // date range.
-  private dateNotInRange(): boolean {
+  dateNotInRange(): boolean {
     const dateTime = DateTime.fromJSDate(this.getSelectedDate());
     if (!this.dateRange) {
       return false;

@@ -7,13 +7,14 @@ import {async, TestBed} from '@angular/core/testing';
 import {DomSanitizer} from '@angular/platform-browser';
 import {DateTime, Interval} from 'luxon';
 import {DisplayConfiguration, GraphData} from 'src/app/graphdatatypes/graphdata';
-import {LabeledSeries} from 'src/app/graphdatatypes/labeled-series';
 
+import {DateTimeXAxis} from './datetimexaxis';
 import {GraphComponent} from './graph.component';
+import {RenderedChart} from './renderedchart';
 
 class StubGraphComponent extends GraphComponent<any> {
   constructor() {
-    super(TestBed.get(DomSanitizer));
+    super(TestBed.get(DomSanitizer), (axis, id) => new RenderedChart(axis, id));
     this.data = new GraphData([], new Map());
     this.data.c3DisplayConfiguration = new DisplayConfiguration(
         [
@@ -23,7 +24,7 @@ class StubGraphComponent extends GraphComponent<any> {
           ],
           ['Vanc Pk', 15, 20]
         ],
-        {'Vanc Pk': 'x_Vanc Pk'}, new Map());
+        {'Vanc Pk': 'x_Vanc Pk'});
   }
   generateChart() {
     return this.generateBasicChart();
@@ -44,7 +45,7 @@ describe('GraphComponent', () => {
 
   beforeEach(() => {
     component = new StubGraphComponent();
-    component.dateRange = dateRange;
+    component.xAxis = new DateTimeXAxis(dateRange);
   });
 
   it('should create', () => {
@@ -52,7 +53,6 @@ describe('GraphComponent', () => {
   });
 
   it('graph x and y values are correctly passed through', () => {
-    component.yAxisConfig = {};
     component.generateBasicChart();
 
     expect(component.chartConfiguration['data']['xs']['Vanc Pk'])
@@ -70,63 +70,21 @@ describe('GraphComponent', () => {
   });
 
   it('y axis bounds passed in okay', () => {
-    component.yAxisConfig = {
-      min: 12,
-      max: 81,
-      padding: {top: 20, bottom: 20},
-      tick: {
-        count: 5,
-        format: d => {
-          return (d).toLocaleString(
-              'en-us', {minimumFractionDigits: 2, maximumFractionDigits: 2});
-        }
-      }
-    };
+    component.yAxisConfig.min = 12;
+    component.yAxisConfig.max = 81;
     component.generateBasicChart();
 
     expect(component.chartConfiguration['axis']['y'])
         .toEqual(component.yAxisConfig);
   });
 
-  it('regions displayed on y-axis', () => {
-    component.yAxisConfig = {};
-    component.generateBasicChart();
-
-    component.chartConfiguration =
-        component.addYRegionOnChart(component.chartConfiguration, [11, 101]);
-
-    expect(component.chartConfiguration['regions'].length).toEqual(1);
-    expect(component.chartConfiguration['regions'][0]['axis']).toEqual('y');
-    expect(component.chartConfiguration['regions'][0]['start']).toEqual(11);
-    expect(component.chartConfiguration['regions'][0]['end']).toEqual(101);
-  });
-
   it('should add point to data set if data is empty', () => {
-    const testComponent = new StubGraphComponent();
-    component.dateRange = Interval.fromDateTimes(
-        DateTime.local(1995, 7, 21, 12), DateTime.local(1995, 7, 24, 0));
+    component.xAxis = new DateTimeXAxis(Interval.fromDateTimes(
+        DateTime.local(1995, 7, 21, 12), DateTime.local(1995, 7, 24, 0)));
     const data = new GraphData([], new Map());
     const millis = -8640000000000000;
     expect(data.c3DisplayConfiguration.allColumns[0][1].toMillis())
         .toEqual(millis);
     expect(data.c3DisplayConfiguration.allColumns[1][1]).toEqual(0);
-  });
-
-
-  it('should check if there are points in the data range', () => {
-    const testComponent = new StubGraphComponent();
-    component.dateRange = Interval.fromDateTimes(
-        DateTime.local(1995, 7, 21, 12), DateTime.local(1995, 7, 24, 0));
-    const series =
-        LabeledSeries.fromInitialPoint(DateTime.local(1995, 7, 23, 12), 0);
-    expect(StubGraphComponent.dataPointsInRange([series], component.dateRange))
-        .toBeTruthy();
-    const series2 =
-        LabeledSeries.fromInitialPoint(DateTime.local(2018, 7, 24, 12), 0);
-    expect(StubGraphComponent.dataPointsInRange([series2], component.dateRange))
-        .toBeFalsy();
-    expect(StubGraphComponent.dataPointsInRange(
-               [series, series2], component.dateRange))
-        .toBeTruthy();
   });
 });
