@@ -5,11 +5,12 @@
 
 import {Component, forwardRef, Input} from '@angular/core';
 import {DomSanitizer} from '@angular/platform-browser';
-import * as c3 from 'c3';
 import * as d3 from 'd3';
 import {LineGraphData} from 'src/app/graphdatatypes/linegraphdata';
+import {ABNORMAL} from 'src/app/theme/bch_colors';
 
-import {GraphComponent, Y_AXIS_TICK_MAX} from '../graph/graph.component';
+import {GraphComponent} from '../graph/graph.component';
+import {RenderedChart} from '../graph/renderedchart';
 
 @Component({
   selector: 'app-linegraph',
@@ -23,77 +24,17 @@ export class LineGraphComponent extends GraphComponent<LineGraphData> {
   @Input() showTicks: boolean;
 
   constructor(readonly sanitizer: DomSanitizer) {
-    super(sanitizer);
-  }
-  /**
-   * @override
-   */
-  generateChart() {
-    this.adjustYAxisConfig();
-    this.generateBasicChart();
-    this.adjustDataDependent();
-
-    // Ensure that a line is not drawn through points with "null" values.
-    this.chartConfiguration.line = {connectNull: false};
+    super(sanitizer, (axis, id) => new RenderedChart(axis, id));
   }
 
-  /**
-   * Adjusts the y-axis configuration for the chart.
-   */
-  adjustYAxisConfig() {
-    // Give labels to each series and make a map of x-values to y-values.
-    let min;
-    let max;
-    if (this.data.yAxisDisplayBounds[0] > this.data.yAxisDisplayBounds[1]) {
-      // No min or max set due to no data.
-      min = 0;
-      max = 10;
-    } else {
-      min = this.data.yAxisDisplayBounds[0];
-      max = this.data.yAxisDisplayBounds[1];
+  prepareForChartConfiguration() {
+    if (this.data.yAxisDisplayBounds) {
+      this.yAxisConfig.min = this.data.yAxisDisplayBounds[0];
+      this.yAxisConfig.max = this.data.yAxisDisplayBounds[1];
     }
-
-    this.yAxisConfig = {
-      min: min,
-      max: max,
-      padding: {top: 20, bottom: 20},
-      tick: {
-        count: 5,
-        format: d => {
-          // We add padding to our y-axis tick labels so that all y-axes of the
-          // charts rendered on the page can be aligned.
-          return (d)
-              .toLocaleString('en-us', {
-                minimumFractionDigits: this.data.precision,
-                maximumFractionDigits: this.data.precision
-              })
-              .trim()
-              .padStart(Y_AXIS_TICK_MAX, '\xa0');
-        }
-      },
-    };
   }
 
-  /**
-   * Adjusts the data-dependent fields of the chart's configuration.
-   */
-  adjustDataDependent() {
-    // Some things are only valid if there are y-axis normal bounds. We
-    // also only show normal bounds if there's one data series on the
-    // axis.
-    // These customizations are based on this.data, which is a type specific for
-    // LineGraphData, and could not be generalized in the abstract GraphCard
-    // class.
-    if (this.data.series.length > 0) {
-      const yBounds = this.data.series[0].yNormalBounds;
-      if (this.data.series.length === 1 && yBounds) {
-        this.chartConfiguration =
-            this.addYRegionOnChart(this.chartConfiguration, yBounds);
-      }
-    }
-    // Check if there are any data points in the time range.
-    this.noDataPointsInDateRange =
-        !GraphComponent.dataPointsInRange(this.data.series, this.dateRange);
+  adjustGeneratedChartConfiguration() {
     // If tick values aren't set, calculate the values.
     if (!this.chartConfiguration.axis.y.tick.values) {
       this.chartConfiguration.axis.y.tick.values = this.findYAxisValues(
@@ -107,29 +48,22 @@ export class LineGraphComponent extends GraphComponent<LineGraphData> {
         this.chartConfiguration.axis.y.tick.values.push(i);
       }
     }
-    const yValues = this.chartConfiguration.axis.y.tick.values;
-    const needToWrap =
-        yValues.some(value => value.toString().length > Y_AXIS_TICK_MAX);
-    // Due to some weird c3 rendering, we need extra padding for tick marks less
-    // than 2 characters long.
-    const needExtraPadding =
-        yValues.every(value => value.toString().length < 2);
-    // Replace the tick label's initially displayed values to padded empty
-    // strings so that the axis is aligned. We only do this if we need to wrap
-    // axis labels in the first place.
-    const extraPadding = 4;
-    const padding = needToWrap ?
-        Y_AXIS_TICK_MAX :
-        (needExtraPadding ? Y_AXIS_TICK_MAX + extraPadding : undefined);
-    if (padding) {
-      this.chartConfiguration.axis.y.tick.format = function(d) {
-        return ''.trim().padStart(padding, '\xa0');
+
+    if (this.data.yAxisDisplayBounds) {
+      this.yAxisConfig.min = this.data.yAxisDisplayBounds[0];
+      this.yAxisConfig.max = this.data.yAxisDisplayBounds[1];
+    }
+
+    // If there's just one data series and it has normal bounds, let the colors
+    // get set for abnormal points in the series.
+    if (this.data.series.length === 1 && this.data.series[0].yNormalBounds) {
+      this.chartConfiguration.data.color = (color, d) => {
+        return (d.value !== undefined &&
+                (d.value < this.data.series[0].yNormalBounds[0] ||
+                 d.value > this.data.series[0].yNormalBounds[1])) ?
+            ABNORMAL.toString() :
+            color;
       };
-      this.yAxisTickDisplayValues =
-          yValues.map(value => value.toLocaleString('en-us', {
-            minimumFractionDigits: this.data.precision,
-            maximumFractionDigits: this.data.precision
-          }));
     }
   }
 
@@ -151,5 +85,35 @@ export class LineGraphComponent extends GraphComponent<LineGraphData> {
           .selectAll('.c3-axis-y .tick')
           .style('display', 'none');
     }
+    this.addYNormalRange();
+  }
+
+  /**
+   * Adds y normal ranges to the graph.
+   */
+  private addYNormalRange() {
+    // Only LineGraphData has y normal bounds.
+    if (!(this.data instanceof LineGraphData)) {
+      return;
+    }
+    // If there's more than one series on this graph we don't mark a normal
+    // region because they might not be the same.
+    if (this.data.series.length !== 1) {
+      return;
+    }
+    const yBounds = this.data.series[0].yNormalBounds;
+    // If there aren't bounds, there's nothing to add.
+    if (!yBounds) {
+      return;
+    }
+
+    const self = this;
+    this.renderedChart.addToRenderQueue(() => {
+      self.renderedChart.setYNormalBoundMarkers(yBounds);
+    });
+    this.renderedChart.addToRenderQueue(() => {
+      self.renderedChart.addYRegion(
+          {axis: 'y', start: yBounds[0], end: yBounds[1]});
+    });
   }
 }

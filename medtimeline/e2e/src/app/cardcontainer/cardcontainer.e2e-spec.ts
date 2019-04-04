@@ -10,15 +10,15 @@ import {IndexPage} from '../index.po';
 import {CardContainerPage} from './cardcontainer.po';
 
 describe('Card Container', () => {
-  const page: CardContainerPage = new CardContainerPage();
-  const index: IndexPage = new IndexPage();
+  const page = new CardContainerPage();
+  const index = new IndexPage();
   const cards = page.getCards();
   const intialBackgroundColor = 'rgba(248, 248, 248, 1)';
   const finalBackgroundColor = 'rgba(240, 240, 240, 1)';
   jasmine.DEFAULT_TIMEOUT_INTERVAL = 50 * 1000;
   beforeEach(async () => {
     await browser.waitForAngularEnabled(false);
-    await browser.get('/');
+    await browser.get('/setup');
     index.navigateToMainPage();
     browser.driver.executeScript(disableCSSAnimation);
     // Disable CSS animations and transitions, to accurately test style changes
@@ -88,18 +88,18 @@ describe('Card Container', () => {
          'Body temperature',
          'Heart Rate',
          'Respiratory Rate',
+         'SpO2',
          'Blood Pressure',
-         'Oxygen Saturation',
          'C-Reactive Protein',
          'ESR',
          'BUN',
          'Creatinine',
-         'ALT',
-         'AST',
+         'Alanine Aminotransferase (ALT)',
+         'Aspartate Aminotransferase (AST)',
          'Alkaline Phosphatase',
          'Bilirubin, Direct',
          'Bilirubin, Total',
-         'CBC White Blood Cell',
+         'Complete Blood Count White Blood Cell',
          'Vancomycin & Gentamicin Summary',
          'Vancomycin',
          'Stool',
@@ -156,22 +156,109 @@ describe('Card Container', () => {
     });
   });
 
-  it('drag icons should only appear on hover', async () => {
+  it('should correctly delete card', async () => {
+    const cardLabels = [];
     await cards.each(async function(el) {
-      if (await index.hasInnerElement(el, '.dragCardIcon')) {
-        const card = await index.getElement(el, 'mat-card');
-
-        const dragIcon = await index.getElement(card, '.dragCardIcon');
-        const initialDragIconOpacity =
-            await index.getStyle(dragIcon, 'opacity');
-        expect(initialDragIconOpacity).toEqual('0');
-
-        await index.hoverOverElement(card);
-
-        const finalDragIconOpacity = await index.getStyle(dragIcon, 'opacity');
-        expect(finalDragIconOpacity).toEqual('0.4');
+      if (await page.hasCardLabel(el)) {
+        cardLabels.push(await page.getCardLabel(el));
       }
     });
+
+    const tempCard = await index.getElement(cards.get(2), 'mat-card');
+    const deleteIcon = await index.getElement(tempCard, '.removeCardButton');
+    await deleteIcon.click();
+
+    await page.waitForDialog();
+    const deleteButton = page.getDeleteButton();
+    await index.waitForClickable(
+        deleteButton, jasmine.DEFAULT_TIMEOUT_INTERVAL);
+    await deleteButton.click();
+
+    const updatedCardLabels = [];
+    const updatedCards = page.getCards();
+    await updatedCards.each(async function(el) {
+      if (await page.hasCardLabel(el)) {
+        updatedCardLabels.push(await page.getCardLabel(el));
+      }
+    });
+
+    expect(updatedCardLabels.length).toEqual(cardLabels.length - 1);
+
+    expect(updatedCardLabels).toEqual([
+      'Custom Timeline', 'Heart Rate', 'Respiratory Rate', 'SpO2',
+      'Blood Pressure', 'C-Reactive Protein', 'ESR', 'BUN', 'Creatinine',
+      'Alanine Aminotransferase (ALT)', 'Aspartate Aminotransferase (AST)',
+      'Alkaline Phosphatase', 'Bilirubin, Direct', 'Bilirubin, Total',
+      'Complete Blood Count White Blood Cell',
+      'Vancomycin & Gentamicin Summary', 'Vancomycin', 'Stool', 'NP Swab'
+    ]);
+  });
+
+  it('should correctly undo a deletion of card', async () => {
+    const cardLabels = [];
+    await cards.each(async function(el) {
+      if (await page.hasCardLabel(el)) {
+        cardLabels.push(await page.getCardLabel(el));
+      }
+    });
+
+    const tempCard = await index.getElement(cards.get(2), 'mat-card');
+    const deleteIcon = await index.getElement(tempCard, '.removeCardButton');
+    await deleteIcon.click();
+
+    await page.waitForDialog();
+    const deleteButton = page.getDeleteButton();
+    await index.waitForClickable(
+        deleteButton, jasmine.DEFAULT_TIMEOUT_INTERVAL);
+    await deleteButton.click();
+
+    await page.waitForSnackbar();
+    const undo = await page.getUndoButton();
+    await index.waitForClickable(undo, jasmine.DEFAULT_TIMEOUT_INTERVAL);
+    await undo.click();
+    const updatedCardLabels = [];
+    const updatedCards = page.getCards();
+    await updatedCards.each(async function(el) {
+      if (await page.hasCardLabel(el)) {
+        updatedCardLabels.push(await page.getCardLabel(el));
+      }
+    });
+
+    expect(updatedCardLabels.length).toEqual(cardLabels.length);
+
+    expect(updatedCardLabels.toString()).toEqual(cardLabels.toString());
+  });
+
+  it('should not delete card if canceled', async () => {
+    const cardLabels = [];
+    await cards.each(async function(el) {
+      if (await page.hasCardLabel(el)) {
+        cardLabels.push(await page.getCardLabel(el));
+      }
+    });
+
+    const tempCard = await index.getElement(cards.get(2), 'mat-card');
+    const deleteIcon = await index.getElement(tempCard, '.removeCardButton');
+    await deleteIcon.click();
+
+    await page.waitForDialog();
+    const cancelButton = page.getCancelButton();
+    await index.waitForClickable(
+        cancelButton, jasmine.DEFAULT_TIMEOUT_INTERVAL);
+    await cancelButton.click();
+
+
+    const updatedCardLabels = [];
+    const updatedCards = page.getCards();
+    await updatedCards.each(async function(el) {
+      if (await page.hasCardLabel(el)) {
+        updatedCardLabels.push(await page.getCardLabel(el));
+      }
+    });
+
+    expect(updatedCardLabels.length).toEqual(cardLabels.length);
+
+    expect(updatedCardLabels.toString()).toEqual(cardLabels.toString());
   });
 
   it('background of card should change on hover', async () => {
