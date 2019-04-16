@@ -5,7 +5,7 @@
 
 import {async, ComponentFixture, TestBed} from '@angular/core/testing';
 import {FormsModule, ReactiveFormsModule} from '@angular/forms';
-import {MatNativeDateModule, MatRadioModule} from '@angular/material';
+import {MatNativeDateModule, MatRadioModule, MatTooltipModule} from '@angular/material';
 import {MatAutocompleteModule} from '@angular/material/autocomplete';
 import {MatCardModule} from '@angular/material/card';
 import {MatCheckboxModule} from '@angular/material/checkbox';
@@ -23,9 +23,11 @@ import {By, DomSanitizer} from '@angular/platform-browser';
 import {BrowserModule} from '@angular/platform-browser';
 import {BrowserAnimationsModule} from '@angular/platform-browser/animations';
 import {DateTime, Interval} from 'luxon';
+import {ChartsModule} from 'ng2-charts';
 import {DragulaService} from 'ng2-dragula';
 import {NgxDaterangepickerMd} from 'ngx-daterangepicker-material';
 import {of} from 'rxjs';
+import {UI_CONSTANTS, UI_CONSTANTS_TOKEN} from 'src/constants';
 
 import {CardComponent} from '../cardtypes/card/card.component';
 import {CustomizableTimelineComponent} from '../cardtypes/customizable-timeline/customizable-timeline.component';
@@ -71,12 +73,27 @@ describe('CardcontainerComponent', () => {
     TestBed
         .configureTestingModule({
           imports: [
-            MatCardModule, MatIconModule, MatListModule, MatDividerModule,
-            MatDatepickerModule, MatNativeDateModule, MatAutocompleteModule,
-            MatInputModule, FormsModule, ReactiveFormsModule, BrowserModule,
-            BrowserAnimationsModule, MatProgressSpinnerModule, MatMenuModule,
-            NgxDaterangepickerMd.forRoot(), MatToolbarModule, MatSnackBarModule,
-            MatCheckboxModule, MatRadioModule
+            MatCardModule,
+            MatIconModule,
+            MatListModule,
+            MatDividerModule,
+            MatDatepickerModule,
+            MatNativeDateModule,
+            MatAutocompleteModule,
+            MatInputModule,
+            FormsModule,
+            ReactiveFormsModule,
+            BrowserModule,
+            BrowserAnimationsModule,
+            MatProgressSpinnerModule,
+            MatMenuModule,
+            NgxDaterangepickerMd.forRoot(),
+            MatToolbarModule,
+            MatSnackBarModule,
+            MatCheckboxModule,
+            MatRadioModule,
+            MatTooltipModule,
+            ChartsModule
           ],
           declarations: [
             CardcontainerComponent, TextboxcardComponent,
@@ -90,6 +107,7 @@ describe('CardcontainerComponent', () => {
           providers: [
             {provide: FhirService, useValue: new StubFhirService()},
             {provide: ResourceCodeManager, useValue: resourceCodeManagerStub},
+            {provide: UI_CONSTANTS_TOKEN, useValue: UI_CONSTANTS},
             DragulaService, {provide: MAT_DIALOG_DATA, useValue: {}}, {
               provide: SetupDataService,
               useValue: {
