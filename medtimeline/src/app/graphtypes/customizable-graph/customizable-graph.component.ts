@@ -13,7 +13,6 @@ import {DateTime, Interval} from 'luxon';
 import {CustomizableTimelineDialogComponent} from 'src/app/cardtypes/customizable-timeline/customizable-timeline-dialog/customizable-timeline-dialog.component';
 import {CustomizableData} from 'src/app/graphdatatypes/customizabledata';
 
-import {DateTimeXAxis} from '../graph/datetimexaxis';
 import {GraphComponent} from '../graph/graph.component';
 import {RenderedCustomizableChart} from '../graph/renderedcustomizablechart';
 
@@ -32,19 +31,26 @@ import {CustomizableGraphAnnotation} from './customizable-graph-annotation';
 })
 export class CustomizableGraphComponent extends
     GraphComponent<CustomizableData> implements OnChanges, OnDestroy {
-  // An event indicating that the points on the CustomizableGraph have changed.
+  /**
+   * An event indicating that the points on the CustomizableGraph have changed.
+   */
   @Output() pointsChanged = new EventEmitter<CustomizableData>();
+  /**
+   * Holds whether this graph is in edit mode.
+   */
   @Input() inEditMode: boolean;
-  // Kept around for compatibility with the custom timeline. To be removed.
-  @Input() xAxis: DateTimeXAxis;
 
   // The reference for the Dialog opened.
   private dialogRef: any;
 
+  renderedChart: RenderedCustomizableChart;
+  chartConfiguration: c3.ChartConfiguration;
+
   constructor(readonly sanitizer: DomSanitizer, public dialog: MatDialog) {
     super(sanitizer);
-    const renderedConstructor = (axis: DateTimeXAxis, divId: string) =>
-        new RenderedCustomizableChart(axis, divId);
+    this.chartTypeString = 'scatter';
+    const renderedConstructor = (dateRange: Interval, divId: string) =>
+        new RenderedCustomizableChart(dateRange, divId);
   }
 
   ngOnDestroy() {
@@ -56,45 +62,38 @@ export class CustomizableGraphComponent extends
 
   ngOnChanges(changes: SimpleChanges) {
     if (changes.inEditMode && this.renderedChart) {
-      (this.renderedChart as RenderedCustomizableChart).inEditMode =
-          changes.inEditMode.currentValue;
-    } else {
-      this.generateChart();
+      this.renderedChart.inEditMode = changes.inEditMode.currentValue;
     }
+    super.ngOnChanges(changes);
   }
 
-  generateChart() {
-    super.generateChart();
-    // Once the chart is rendered, only display the data points in the current
-    // date range. This is due to a C3 bug that plots some points
-    // outside of the x-axis/y-axis boundaries upon loading additional data.
-    this.loadNewData();
+  adjustGeneratedChartConfiguration() {
+    const self = this;
+
+    // Show the time as we hover across the graph.
+    this.chartOptions.onHover = function(event) {
+      const chart: any = this;
+      const yScale = chart.scales[GraphComponent.Y_AXIS_ID];
+      const xScale = chart.scales[GraphComponent.X_AXIS_ID];
+      const currentDate =
+          DateTime.fromJSDate(xScale.getValueForPixel(event.offsetX).toDate());
+      const currentDateString = currentDate.toLocaleString() + ' ' +
+          currentDate.toLocal().toLocaleString(DateTime.TIME_24_SIMPLE);
+
+      chart.clear();
+      chart.draw();
+      if (self.dateRange.contains(currentDate)) {
+        chart.ctx.beginPath();
+        chart.ctx.moveTo(event.offsetX, 0);
+        chart.ctx.strokeStyle = '#A0A0A0';
+        chart.ctx.lineTo(event.offsetX, yScale.bottom);
+        chart.ctx.stroke();
+        chart.ctx.fillText(currentDateString, event.offsetX, yScale.bottom / 2);
+      }
+    };
+
     // Update the annotations displayed for this chart.
     this.updateAnnotations();
-  }
-
-  // This function loads the data into the chart without needing the chart to be
-  // re-rendered completely. We only load data that is strictly within the date
-  // range being displayed on the chart, due to a C3 bug that plots some points
-  // outside of the x-axis/y-axis boundaries.
-  private loadNewData() {
-    const columnsToLoad: any = [['x_'], ['']];
-    const entireInterval = Interval.fromDateTimes(
-        this.xAxis.dateRange.start.toLocal().startOf('day'),
-        this.xAxis.dateRange.end.toLocal().endOf('day'));
-    for (let i = 1; i < this.data.c3DisplayConfiguration.allColumns[0].length;
-         i++) {
-      // Only add the data to the array being loaded if it is within the date
-      // range.
-      if (entireInterval.contains(
-              this.data.c3DisplayConfiguration.allColumns[0][i])) {
-        columnsToLoad[0].push(
-            this.data.c3DisplayConfiguration.allColumns[0][i]);
-        columnsToLoad[1].push(0);
-      }
-    }
-    (this.renderedChart as RenderedCustomizableChart)
-        .loadNewData(columnsToLoad);
   }
 
   // If the selected date already has an annotation, modify the time
@@ -122,19 +121,19 @@ export class CustomizableGraphComponent extends
   private openDialog(
       clickCoordinates: [number, number],
       editedAnnotation?: CustomizableGraphAnnotation) {
-    const xCoordinate = (this.renderedChart as RenderedCustomizableChart)
-                            .getClickCoordinate(clickCoordinates[0]);
+    const xCoordinate =
+        this.renderedChart.getClickCoordinate(clickCoordinates[0]);
     // Make the dialog show up near where the user clicked.
     const data = editedAnnotation ? {
       title: editedAnnotation.title,
       date: new Date(editedAnnotation.timestamp.toMillis()),
       description: editedAnnotation.description,
       color: editedAnnotation.color,
-      dateRange: this.xAxis.dateRange,
+      dateRange: this.dateRange,
     } :
                                     {
                                       date: xCoordinate,
-                                      dateRange: this.xAxis.dateRange,
+                                      dateRange: this.dateRange,
                                     };
 
     this.dialogRef =
@@ -162,17 +161,17 @@ export class CustomizableGraphComponent extends
         // Only display the annotation if the user selected date is within the
         // current date range.
         const entireInterval = Interval.fromDateTimes(
-            this.xAxis.dateRange.start.toLocal().startOf('day'),
-            this.xAxis.dateRange.end.toLocal().endOf('day'));
+            this.dateRange.start.toLocal().startOf('day'),
+            this.dateRange.end.toLocal().endOf('day'));
         if (entireInterval.contains(userSelectedDate)) {
           this.data.annotations.get(userSelectedDate.toMillis())
-              .addAnnotation(this.renderedChart as RenderedCustomizableChart);
+              .addAnnotation();
           // Add listeners for click events on the new annotation.
           this.addDeleteEvent(userSelectedDate.toMillis());
           this.addEditListener(userSelectedDate.toMillis());
         }
-        this.loadNewData();
         this.pointsChanged.emit(this.data);
+        this.generateChart();
       }
     });
   }
@@ -188,16 +187,15 @@ export class CustomizableGraphComponent extends
                               .selectAll('circle')
                               .nodes();
     const entireInterval = Interval.fromDateTimes(
-        this.xAxis.dateRange.start.toLocal().startOf('day'),
-        this.xAxis.dateRange.end.toLocal().endOf('day'));
+        this.dateRange.start.toLocal().startOf('day'),
+        this.dateRange.end.toLocal().endOf('day'));
     if (chartedPoints.length > 0) {
       for (let i = 0; i < timestamps.length; i++) {
         const timestamp = timestamps[i];
         // Only add the annotation if the chart point is displayed given the
         // date range selected.
         if (entireInterval.contains(DateTime.fromMillis(timestamp))) {
-          this.data.annotations.get(timestamp).addAnnotation(
-              this.renderedChart as RenderedCustomizableChart);
+          this.data.annotations.get(timestamp).addAnnotation();
           // Add listeners for click events on the new annotation.
           this.addDeleteEvent(timestamp);
           this.addEditListener(timestamp);
@@ -264,21 +262,18 @@ export class CustomizableGraphComponent extends
     this.chartConfiguration.data.type = 'scatter';
     const self = this;
     this.chartConfiguration.data.onmouseover = function(d) {
-      (self.renderedChart as RenderedCustomizableChart).hoveringOverPoint =
-          true;
+      self.renderedChart.hoveringOverPoint = true;
     };
     this.chartConfiguration.tooltip = {show: false};
     this.chartConfiguration.data.onmouseout = function(d) {
       // Add a timeout to ensure that the user can't add a point immediately
       // after moving away from an existing point.
       setTimeout(() => {
-        (self.renderedChart as RenderedCustomizableChart).hoveringOverPoint =
-            false;
+        self.renderedChart.hoveringOverPoint = false;
       }, 500);
     };
     this.chartConfiguration.data.onclick = function(d, element) {
-      (self.renderedChart as RenderedCustomizableChart).hoveringOverPoint =
-          true;
+      self.renderedChart.hoveringOverPoint = true;
     };
 
     this.chartConfiguration.data.color = function(color, d) {
@@ -295,9 +290,8 @@ export class CustomizableGraphComponent extends
   adjustDataDependent() {}
 
   onRendered() {
-    (this.renderedChart as RenderedCustomizableChart)
-        .initialize(
-            (coords: [number, number], parentCoords: [number, number]) =>
-                this.addPoint(coords, parentCoords));
+    this.renderedChart.initialize(
+        (coords: [number, number], parentCoords: [number, number]) =>
+            this.addPoint(coords, parentCoords));
   }
 }
