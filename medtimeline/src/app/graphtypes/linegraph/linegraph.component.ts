@@ -31,10 +31,24 @@ export class LineGraphComponent extends GraphComponent<LineGraphData> {
     if (this.data.yAxisDisplayBounds) {
       // We only ever have one y-axis so it's safe to work only on the 0th
       // subscript here.
+      // Calculate the data range and add a bit of padding at top and bottom
+      // (unless the bottom is zero or the top is 100--those might be
+      // percentages). This reasonably ensures that there's no cropping where
+      // the normal bound labels would get cut off.
+      const padding =
+          (this.data.yAxisDisplayBounds[1] - this.data.yAxisDisplayBounds[0]) *
+          0.25;
       this.chartOptions.scales.yAxes[0].ticks.min =
-          this.data.yAxisDisplayBounds[0];
+          Math.max(this.data.yAxisDisplayBounds[0] - padding, 0);
       this.chartOptions.scales.yAxes[0].ticks.max =
-          this.data.yAxisDisplayBounds[1];
+          this.data.yAxisDisplayBounds[1] === 100 ?
+          this.data.yAxisDisplayBounds[1] :
+          this.data.yAxisDisplayBounds[1] + padding;
+      this.chartOptions.scales.yAxes[0].afterBuildTicks = (scale) => {
+        if (this.data && this.data.yTicks) {
+          scale.ticks = this.data.yTicks;
+        }
+      };
     }
   }
 
@@ -53,19 +67,25 @@ export class LineGraphComponent extends GraphComponent<LineGraphData> {
     if (!(this.data instanceof LineGraphData)) {
       return;
     }
+
+    // Color points that fall outside of their respective normal ranges.
+    for (let i = 0; i < this.data.series.length; i++) {
+      const chartjsSeries = this.chartData[i];
+      const labeledSeries = this.data.series[i];
+      this.colorAbnormalPoints(
+          chartjsSeries, labeledSeries.yNormalBounds, labeledSeries.legendInfo);
+    }
+
     // If there's more than one series on this graph we don't mark a normal
     // region because they might not be the same.
-    if (this.data.series.length !== 1) {
-      return;
-    }
-    const yBounds = this.data.series[0].yNormalBounds;
-    // If there aren't bounds, there's nothing to add.
+    const yBounds = this.data.series.length === 1 ?
+        this.data.series[0].yNormalBounds :
+        undefined;
     if (!yBounds) {
       return;
     }
 
     this.addGreenRegion(yBounds);
-    this.colorAbnormalPoints(yBounds, this.data.series[0].legendInfo);
   }
 
   /**
@@ -89,13 +109,14 @@ export class LineGraphComponent extends GraphComponent<LineGraphData> {
 
     // Draw label lines for the high and low bounds of the normal range.
     const lines = [
-      ['High normal boundary: ', yNormalBounds[1]],
-      ['Low normal boundary: ', yNormalBounds[0]]
+      ['High normal boundary: ', yNormalBounds[1], -8],
+      ['Low normal boundary: ', yNormalBounds[0], 8]
     ];
 
     for (const line of lines) {
       const lbl = line[0];
       const val = line[1];
+      const yOffsetPx = line[2];
       const bound = {
         type: 'line',
         mode: 'horizontal',
@@ -105,9 +126,15 @@ export class LineGraphComponent extends GraphComponent<LineGraphData> {
         borderWidth: 2,
         label: {
           enabled: true,
-          fontColor: 'rgba(64, 191, 128, 1)',
+          // Clear background color.
+          backgroundColor: 'rgba(0,0,0,0.0)',
+          // Black text for label.
+          fontColor: 'rgba(0, 0, 0, 0.8)',
           content: lbl + val.toString() + ' ' + this.data.unit,
-          position: 'right'
+          // Shift the text above or below the line, and to the right side of
+          // the axis.
+          position: 'right',
+          yAdjust: yOffsetPx
         }
       };
 
@@ -120,36 +147,33 @@ export class LineGraphComponent extends GraphComponent<LineGraphData> {
    * Colors the point the default series color if it's in the normal range,
    * or the designated "abnormal" color if it's outside of the normal range.
    *
+   * @param series The data series to color points for.
    * @param yNormalBounds The bounds of what should be considered normal.
    * @param seriesLegend The legend info for the series we're working with.
    */
   private colorAbnormalPoints(
-      yNormalBounds: [number, number], seriesLegend: LegendInfo) {
+      series: any, yNormalBounds: [number, number], seriesLegend: LegendInfo) {
     const pointBackgroundColors = new Array<string>();
     const pointBorderColors = new Array<string>();
 
-    if (this.chartData.length > 0) {
-      // We only ever get here if there's a single labeled series so it's okay
-      // from here on out to only work with the 0th index of the data.
-      for (let pt of this.chartData[0].data) {
-        // pt could also be a number here, so we constrain it to when it's a
-        // ChartPoint. For some reason Typescript doesn't like it when we do a
-        // test to see if pt is an instanceof ChartPoint so checking for the
-        // y-attribute is a workaround.
-        if (pt.hasOwnProperty('y')) {
-          pt = pt as ChartPoint;
-          if (pt.y < yNormalBounds[0] || pt.y > yNormalBounds[1]) {
-            pointBackgroundColors.push(ABNORMAL.rgb().string());
-            pointBorderColors.push(ABNORMAL.rgb().string());
-          } else {
-            pointBackgroundColors.push(seriesLegend.fill.rgb().string());
-            pointBorderColors.push(seriesLegend.outline.rgb().string());
-          }
+    for (let pt of series.data) {
+      // pt could also be a number here, so we constrain it to when it's a
+      // ChartPoint. For some reason Typescript doesn't like it when we do a
+      // test to see if pt is an instanceof ChartPoint so checking for the
+      // y-attribute is a workaround.
+      if (pt.hasOwnProperty('y')) {
+        pt = pt as ChartPoint;
+        if (yNormalBounds &&
+            (pt.y < yNormalBounds[0] || pt.y > yNormalBounds[1])) {
+          pointBackgroundColors.push(seriesLegend.fill.rgb().string());
+          pointBorderColors.push(ABNORMAL.rgb().string());
+        } else {
+          pointBackgroundColors.push(seriesLegend.fill.rgb().string());
+          pointBorderColors.push(seriesLegend.outline.rgb().string());
         }
+        series.pointBackgroundColor = pointBackgroundColors;
+        series.pointBorderColor = pointBorderColors;
       }
-
-      this.chartData[0].pointBackgroundColor = pointBackgroundColors;
-      this.chartData[0].pointBorderColor = pointBorderColors;
     }
   }
 }
