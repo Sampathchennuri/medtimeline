@@ -37,6 +37,7 @@ export class SetupComponent implements OnInit, OnDestroy {
   readonly chosenConcepts = new Array<AxisGroup>();
   readonly useDebugger = environment.useDebugger;
 
+
   /**
    * Which encounter to load into the app first.
    */

@@ -1,5 +1,5 @@
 .cardContainer {
-  background-color: #002356; /* PRIMARY_COLOR */
+  background-color: #202020; /* GREY_900 */
   display: flex;
   display: -ms-flexbox; /* For IE10 */
   padding: 15px;
@@ -34,7 +34,9 @@
 }
 
 .mat-toolbar {
-  background-color: #00002d; /* PRIMARY_COLOR, dark variant */
+   /* Deep Purple 800 to Pink 900 */
+  background-image: linear-gradient(to right, #4527A0 , #870D4E);
+  color: white;
 }
 
 ::ng-deep .gu-unselectable app-data-selector-menu {
@@ -69,4 +71,4 @@
   -ms-flex-direction: row;
   display: flex;
   display: -ms-flexbox; /* For IE10 */
-} 
+}
