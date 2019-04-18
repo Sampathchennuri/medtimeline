@@ -5,6 +5,7 @@
 
 import {Component, Inject} from '@angular/core';
 import {MatDialog, MatDialogRef, MatSnackBar} from '@angular/material';
+import html2canvas from 'html2canvas';
 import {DateTime, Interval} from 'luxon';
 import {DragulaService} from 'ng2-dragula';
 import {Subscription} from 'rxjs';
@@ -82,8 +83,6 @@ export class CardcontainerComponent {
   private eventsForCustomTimelines =
       new Map<string, Array<{[key: string]: number | string}>>();
 
-  // TODO(b/119251288): Extract out the constants to somewhere shared between
-  // the ts files and html files.
   constructor(
       dragulaService: DragulaService,
       private fhirService: FhirService,
@@ -132,6 +131,13 @@ export class CardcontainerComponent {
         originalIndex++;
       }
       this.displayedConcepts.splice(originalIndex, 1);
+      // Record the user moving a card to Google Analytics.
+      (<any>window).gtag('event', 'moveCard', {
+        'event_category': 'moveCard',
+        'event_label':
+            ((typeof elementDisplayed === 'string') ? elementDisplayed :
+                                                      elementDisplayed.label)
+      });
     }));
   }
 
@@ -179,20 +185,28 @@ export class CardcontainerComponent {
 
   // Saves a snapshot of the graph drawer HTML to the EHR using a FhirService.
   snapshot() {
-    const html = document.getElementsByClassName('cardContainer')[0].innerHTML;
-    this.saveDialogRef =
-        this.saveDialog.open(ConfirmSaveComponent, {data: html, height: '80%'});
-    this.saveDialogRef.afterClosed().subscribe(result => {
-      // Only save the snapshot to the EHR if the user confirmed the save.
-      if (result) {
-        const date = DateTime.fromJSDate(new Date()).toISO();
-        this.fhirService.saveStaticNote(html, date);
-        this.snackBar.open(
-            this.uiConstants.SAVED_TO_POWERCHART, this.uiConstants.DISMISS, {
-              duration: this.DISPLAY_TIME,  // Wait 6 seconds before dismissing
-                                            // the snack bar.
-            });
-      }
+    html2canvas(document.body).then((canvas) => {
+      this.saveDialogRef = this.saveDialog.open(
+          ConfirmSaveComponent, {data: canvas, height: '80%'});
+
+      this.saveDialogRef.afterClosed().subscribe(result => {
+        // Only save the snapshot to the EHR if the user confirmed the save.
+        if (result) {
+          const date = DateTime.fromJSDate(new Date()).toISO();
+          this.fhirService.saveStaticNote(canvas, date);
+          this.snackBar.open(
+              this.uiConstants.SAVED_TO_POWERCHART, this.uiConstants.DISMISS, {
+                duration: this.DISPLAY_TIME,  // Wait 6 seconds before
+                                              // dismissing the snack bar.
+              });
+
+        // Record the user saving a snapshot to Google Analytics.
+        (<any>window).gtag('event', 'saveStaticSnapshot', {
+          'event_category': 'save',
+          'event_label': new Date().toDateString()
+        });
+        }
+      });
     });
   }
 
@@ -238,6 +252,11 @@ export class CardcontainerComponent {
           data: this.displayedConcepts[0].value
         });
       }
+      // Record the user undoing a deletion to Google Analytics.
+      (<any>window).gtag('event', 'undoDelete', {
+        'event_category': 'deleteCard',
+        'event_label': Array.from(this.recentlyRemoved.values()).toString()
+      });
     });
   }
 
@@ -279,8 +298,7 @@ export class CardcontainerComponent {
       return {
         value: x,
         text: $event.data.annotations.get(x).title,
-        class: 'color' +
-            $event.data.annotations.get(x).color.hex().replace('#', '')
+        color: $event.data.annotations.get(x).color.hex()
       };
     });
     this.eventsForCustomTimelines.set($event.id, eventlines);
