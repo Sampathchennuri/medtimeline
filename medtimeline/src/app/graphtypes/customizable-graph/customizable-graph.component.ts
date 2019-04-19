@@ -3,13 +3,15 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-import {Component, EventEmitter, forwardRef, Input, OnChanges, OnDestroy, Output, SimpleChanges} from '@angular/core';
+import {Component, EventEmitter, forwardRef, Inject, Input, OnChanges, OnDestroy, Output, SimpleChanges} from '@angular/core';
 import {MatDialog} from '@angular/material/dialog';
 import {DomSanitizer} from '@angular/platform-browser';
 import {DateTime, Interval} from 'luxon';
 // tslint:disable-next-line:max-line-length
 import {CustomizableTimelineDialogComponent} from 'src/app/cardtypes/customizable-timeline/customizable-timeline-dialog/customizable-timeline-dialog.component';
 import {CustomizableData} from 'src/app/graphdatatypes/customizabledata';
+import {UI_CONSTANTS_TOKEN} from 'src/constants';
+import {recordGoogleAnalyticsEvent} from 'src/constants';
 
 import {GraphComponent} from '../graph/graph.component';
 
@@ -43,8 +45,10 @@ export class CustomizableGraphComponent extends
   private dialogRef: any;
 
 
-  constructor(readonly sanitizer: DomSanitizer, public dialog: MatDialog) {
-    super(sanitizer);
+  constructor(
+      readonly sanitizer: DomSanitizer, public dialog: MatDialog,
+      @Inject(UI_CONSTANTS_TOKEN) readonly uiConstants: any) {
+    super(sanitizer, uiConstants);
     this.chartTypeString = 'scatter';
   }
 
@@ -117,8 +121,12 @@ export class CustomizableGraphComponent extends
         chart.ctx.fillText(currentDateString, event.offsetX, yScale.bottom / 2);
       }
     };
-    this.removeAnnotations();
-    this.addAnnotations();
+    this.chartOptions.animation = {
+      onComplete: function(chart) {
+        self.removeAnnotations();
+        self.addAnnotations();
+      }
+    };
   }
 
   dateRangeChanged() {
@@ -300,12 +308,9 @@ export class CustomizableGraphComponent extends
         this.pointsChanged.emit(this.data);
         this.generateChart();
 
-        // Record the user adding an event on a CustomizableTimeline to Google
-        // Analytics.
-        (<any>window).gtag('event', 'addEventCustomTimeline', {
-          'event_category': 'customTimeline',
-          'event_label': new Date().toDateString()
-        });
+        recordGoogleAnalyticsEvent(
+            'addEventCustomTimeline', 'customTimeline',
+            new Date().toDateString());
       }
     });
   }
@@ -333,12 +338,10 @@ export class CustomizableGraphComponent extends
   addEditListener(annotation: CustomizableGraphAnnotation) {
     annotation.editIcon.onclick = ((e: MouseEvent) => {
       this.dialogRef = this.openDialog(annotation.timestamp, annotation);
-      // Record the user editing an event on a CustomizableTimeline to Google
-      // Analytics.
-      (<any>window).gtag('event', 'editEventCustomTimeline', {
-        'event_category': 'customTimeline',
-        'event_label': new Date().toDateString()
-      });
+
+      recordGoogleAnalyticsEvent(
+          'editEventCustomTimeline', 'customTimeline',
+          new Date().toDateString());
     });
   }
 }
