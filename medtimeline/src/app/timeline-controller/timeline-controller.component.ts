@@ -3,15 +3,14 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-import {Component, EventEmitter, Inject, Input, Output, Renderer2, ViewChild} from '@angular/core';
+import {Component, EventEmitter, Inject, Input, OnInit, Output, Renderer2, ViewChild} from '@angular/core';
 import {DateTime, Duration, Interval} from 'luxon';
 import * as moment from 'moment';
 import {DaterangepickerDirective} from 'ngx-daterangepicker-material';
-import {APP_TIMESPAN, UI_CONSTANTS_TOKEN} from 'src/constants';
+import {APP_TIMESPAN, recordGoogleAnalyticsEvent, UI_CONSTANTS_TOKEN} from 'src/constants';
 
 import {getDaysForIntervalSet} from '../date_utils';
 import {Encounter} from '../fhir-data-classes/encounter';
-import {FhirService} from '../fhir.service';
 
 /**
  * Date range picker for selecting the time span to show in all the charts.
@@ -27,7 +26,7 @@ import {FhirService} from '../fhir.service';
   templateUrl: './timeline-controller.component.html',
   styleUrls: ['./timeline-controller.component.css']
 })
-export class TimelineControllerComponent {
+export class TimelineControllerComponent implements OnInit {
   @Output() changeDateRange = new EventEmitter<Interval>();
   @ViewChild(DaterangepickerDirective)
   pickerDirective: DaterangepickerDirective;
@@ -38,10 +37,10 @@ export class TimelineControllerComponent {
   @Input() encounters: Encounter[];
 
   /**
-   * Holds the encounter to default to on initial setup. If unset, we'll
+   * Holds the date range to default to on initial setup. If unset, we'll
    * default to the last seven days.
    */
-  @Input() selectedEncounter: Encounter;
+  @Input() selectedDateRange: Interval;
 
   /**
    * Holds all the ISO strings for days covered by all the patient encounters
@@ -56,9 +55,11 @@ export class TimelineControllerComponent {
 
   /** Selected timespan is past seven days by default. */
   readonly defaultDateRange = {
-    startDate: moment.utc(
-        DateTime.utc().minus(Duration.fromObject({days: 7})).toJSDate()),
-    endDate: moment.utc(DateTime.utc())
+    startDate: moment(DateTime.local()
+                          .minus(Duration.fromObject({days: 7}))
+                          .startOf('day')
+                          .toJSDate()),
+    endDate: moment(DateTime.local().startOf('day').toJSDate())
   };
 
   /**
@@ -80,15 +81,10 @@ export class TimelineControllerComponent {
 
   ngOnInit() {
     // Set the initial date range selection and fire off a change event.
-    let selectedRange = this.defaultDateRange;
-    if (this.selectedEncounter && this.selectedEncounter.period) {
-      selectedRange = {
-        startDate: moment(
-            this.selectedEncounter.period.start.startOf('day').toJSDate()),
-        endDate:
-            moment(this.selectedEncounter.period.end.startOf('day').toJSDate())
-      };
-    }
+    const selectedRange = {
+      startDate: moment(this.selectedDateRange.start.startOf('day').toJSDate()),
+      endDate: moment(this.selectedDateRange.end.startOf('day').toJSDate())
+    };
     this.selected = selectedRange;
     this.datesUpdated(selectedRange);
 
@@ -124,10 +120,22 @@ export class TimelineControllerComponent {
             start.format('MM/DD/YYYY') + '-' + end.format('MM/DD/YYYY');
         this.datePickerRanges[label] = [start, end];
       }
-
-      this.datePickerRanges['Last seven days'] =
+      this.datePickerRanges[this.uiConstants.LAST_SEVEN_DAYS] =
           [this.defaultDateRange.startDate, this.defaultDateRange.endDate];
-
+      this.datePickerRanges[this.uiConstants.LAST_MONTH] = [
+        moment(DateTime.local()
+                   .minus(Duration.fromObject({months: 1}))
+                   .startOf('day')
+                   .toJSDate()),
+        this.defaultDateRange.endDate
+      ];
+      this.datePickerRanges[this.uiConstants.LAST_THREE_MONTHS] = [
+        moment(DateTime.local()
+                   .minus(Duration.fromObject({months: 3}))
+                   .startOf('day')
+                   .toJSDate()),
+        this.defaultDateRange.endDate
+      ];
     } else {
       this.encounterError = true;
     }
@@ -163,12 +171,10 @@ export class TimelineControllerComponent {
           DateTime.fromJSDate(rangeIn.endDate.toDate()).endOf('day').toUTC());
       this.changeDateRange.emit(interval);
 
-      // Record the user changing the date range to Google Analytics.
-      (<any>window).gtag('event', 'dateRangeChanged', {
-        'event_category': 'timeline',
-        'event_label': interval.start.toLocaleString() + ' - ' +
-            interval.end.toLocaleString()
-      });
+      recordGoogleAnalyticsEvent(
+          'dateRangeChanged', 'timeline',
+          interval.start.toLocaleString() + ' - ' +
+              interval.end.toLocaleString());
     }
   }
 }

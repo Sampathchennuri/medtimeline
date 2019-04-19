@@ -48,7 +48,7 @@ export class Axis {
    * unless it hasn't been resolved yet. Then this variable will be undefined,
    * and you need to call updateDateRange to get the data loaded in.
    */
-  private alreadyResolvedData: GraphData;
+  alreadyResolvedData: GraphData;
 
   /**
    * The associated DisplayGrouping for this graph.
@@ -136,13 +136,7 @@ export class Axis {
    * application's time scope.
    */
   dataAvailableInAppTimeScope(): Promise<boolean> {
-    return Promise
-        .all(this.resourceGroup.resourceCodes.map(
-            rsc => rsc.dataAvailableInAppTimeScope(this.fhirService)))
-        .then(rsc => {
-          const flattened: boolean[] = [].concat.apply([], rsc);
-          return flattened.reduce((prev, curr) => prev || curr, false);
-        });
+    return this.resourceGroup.dataAvailableInAppTimeScope();
   }
 
   /**
