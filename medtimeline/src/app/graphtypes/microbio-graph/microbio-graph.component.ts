@@ -3,8 +3,10 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-import {Component, forwardRef} from '@angular/core';
+import {Component, forwardRef, Inject} from '@angular/core';
 import {DomSanitizer} from '@angular/platform-browser';
+import {LabeledSeries} from 'src/app/graphdatatypes/labeled-series';
+import {UI_CONSTANTS_TOKEN} from 'src/constants';
 
 import {GraphComponent} from '../graph/graph.component';
 import {StepGraphComponent} from '../stepgraph/stepgraph.component';
@@ -19,8 +21,10 @@ import {StepGraphComponent} from '../stepgraph/stepgraph.component';
   }]
 })
 export class MicrobioGraphComponent extends StepGraphComponent {
-  constructor(sanitizer: DomSanitizer) {
-    super(sanitizer);
+  constructor(
+      sanitizer: DomSanitizer,
+      @Inject(UI_CONSTANTS_TOKEN) readonly uiConstants: any) {
+    super(sanitizer, uiConstants);
   }
 
   prepareForChartConfiguration() {
@@ -32,4 +36,22 @@ export class MicrobioGraphComponent extends StepGraphComponent {
       series.pointBorderWidth = 2;
     }
   }
+
+  /***************************
+   * Legend interactions
+   * Because of the unique nature of the series in the MicrobioGraph, we do not
+   * allow legend interactions for microbiology graphs. This prevents errors
+   * that occur when the user hovers over a legend element that might correspond
+   * to many series on the chart.
+   */
+
+  /**
+   * @override
+   */
+  resetChart() {}
+
+  /**
+   * @override
+   */
+  focusOnSeries(labeledSeries: LabeledSeries[]) {}
 }
